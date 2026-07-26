@@ -15,6 +15,7 @@ local InputDialog = require("ui/widget/inputdialog")
 local Menu = require("ui/widget/menu")
 local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -427,6 +428,38 @@ function Match.showLinkedInfo(ctx)
         buttons_table = buttons,
     }
     UIManager:show(viewer)
+end
+
+--[[--
+Re-points the stored link at the item this one was merged into.
+
+NeoDB merges duplicate catalog entries, and afterwards the uuid we stored answers
+with a redirect to whichever entry survived. The API client spots that and calls
+here, so the link is corrected once rather than every request paying for it.
+
+The survivor can be a different edition, so its details are refetched rather than
+assumed: the title, ISBN, page count and URL all belong to the old entry.
+]]
+function Match.adoptMerge(ctx, old_uuid, new_uuid)
+    local link = ctx.store:getLink(ctx.ui.doc_settings)
+    if not link or link.uuid ~= old_uuid or old_uuid == new_uuid then return end
+
+    link.uuid = new_uuid
+    -- Anything we cannot confirm belongs to the entry that just went away.
+    local ok, item = ctx.api:getBook(new_uuid)
+    if ok and type(item) == "table" and item.uuid then
+        link.url    = Util.absoluteUrl(ctx.store:getInstance(), item.url or item.id)
+        link.title  = item.title or item.display_title or link.title
+        link.author = Util.joinList(item.author) or link.author
+        link.isbn   = item.isbn or link.isbn
+        link.pages  = tonumber(item.pages) or link.pages
+    else
+        -- Keep the uuid fix regardless; a stale URL is better than a stale item.
+        link.url = nil
+    end
+    ctx.store:setLink(ctx.ui.doc_settings, link)
+    logger.info("NeoDB: relinked", old_uuid, "to", new_uuid)
+    return link
 end
 
 --- Pulls the server's current mark into the cache.

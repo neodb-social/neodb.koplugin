@@ -51,6 +51,21 @@ function NeoDB:init()
         api   = self.api,
     }
 
+    --[[--
+    NeoDB merges duplicate catalog entries, and the API client notices when a uuid
+    we hold redirects to whatever survived. Fixing the link needs the open book's
+    sidecar, which only this object knows about, so it is wired here -- once, for
+    every endpoint, rather than at each call site.
+
+    A queue flush can carry ops for books that are not open; `adoptMerge` checks the
+    uuid before touching anything, and those links are corrected when their own book
+    is next used.
+    ]]
+    self.api.on_item_moved = function(old_uuid, new_uuid)
+        if not self.ui.doc_settings then return end
+        Match.adoptMerge(self.ctx, old_uuid, new_uuid)
+    end
+
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
 

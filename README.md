@@ -156,6 +156,7 @@ is what sending it implies. A book already marked, including *Finished* or
 - Posting a mark replaces it on the server, so every write resends the rating,
   comment and tags you already had. If you edit a mark on the web while the book
   is open, use **Refresh from NeoDB** before changing it here.
+- When NeoDB merges two entries, the link follows the surviving one by itself.
 
 ## Layout
 

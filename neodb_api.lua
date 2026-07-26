@@ -27,11 +27,57 @@ local TOTAL_TIMEOUT = 25
 local OOB_REDIRECT = "urn:ietf:wg:oauth:2.0:oob"
 local OAUTH_SCOPES = "read write"
 
+--- Enough hops for a merge chain the server already collapsed into one.
+local MAX_REDIRECTS = 3
+
 local Api = {}
 Api.__index = Api
 
 function Api:new(fields)
     return setmetatable(fields or {}, self)
+end
+
+--[[--
+Resolves a `Location` header against the URL it came from.
+
+NeoDB answers with root-relative locations ("/api/book/<uuid>"), but a redirect may
+legitimately be absolute, so handle both rather than assuming.
+]]
+function Api.resolveLocation(base, location)
+    if type(location) ~= "string" then return nil end
+    location = Util.trim(location)
+    if location == "" then return nil end
+    if location:match("^%a[%w%+%-%.]*://") then return location end
+    local origin = tostring(base or ""):match("^(%a[%w%+%-%.]*://[^/]+)")
+    if not origin then return nil end
+    if location:sub(1, 1) == "/" then return origin .. location end
+    -- Relative to the directory of the base path.
+    local dir = tostring(base):match("^(%a[%w%+%-%.]*://[^/]+.*/)")
+    return (dir or (origin .. "/")) .. location
+end
+
+--- scheme://host[:port], lowercased, or nil if `url` has none.
+local function originOf(url)
+    local origin = tostring(url or ""):match("^(%a[%w%+%-%.]*://[^/]+)")
+    return origin and origin:lower() or nil
+end
+
+--- The path part of an absolute URL.
+function Api.pathOf(url)
+    return tostring(url or ""):match("^%a[%w%+%-%.]*://[^/]*(/.*)$")
+end
+
+--[[--
+Pulls the item uuid out of an item-scoped API path.
+
+Every endpoint we redirect through names the item the same way -- shelf, progress
+and note paths all carry it after "/item/", the catalog reads it after the category
+-- so comparing before and after is enough to notice the item changed under us.
+]]
+function Api.uuidFromPath(path)
+    if type(path) ~= "string" then return nil end
+    path = path:gsub("[?#].*$", "")
+    return path:match("/item/([^/]+)") or path:match("^/api/%a[%w_]*/([^/]+)")
 end
 
 --[[--
@@ -51,94 +97,168 @@ Performs one HTTP request against an absolute URL.
 ]]
 function Api:raw(method, url, opts)
     opts = opts or {}
+    -- Set before anything can return early: a value left over from the previous
+    -- request would look to `call` like this item had moved.
+    self.final_url = url
 
-    local sink = {}
-    local request = {
-        url = url,
-        method = method,
-        headers = { ["Accept"] = "application/json" },
-        sink = ltn12.sink.table(sink),
-    }
+    local headers = { ["Accept"] = "application/json" }
 
     local auth = opts.auth or "required"
     if auth ~= "none" then
         local token = self.store:getToken()
         if token then
-            request.headers["Authorization"] = "Bearer " .. token
+            headers["Authorization"] = "Bearer " .. token
         elseif auth == "required" then
             return false, "unauthorized"
         end
     end
 
     if opts.headers then
-        for name, value in pairs(opts.headers) do request.headers[name] = value end
+        for name, value in pairs(opts.headers) do headers[name] = value end
     end
 
     local body
     if opts.json then
         body = JSON.encode(opts.json)
-        request.headers["Content-Type"] = "application/json"
+        headers["Content-Type"] = "application/json"
     elseif opts.form then
         body = Util.buildQuery(opts.form)
-        request.headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     end
     if body then
-        request.headers["Content-Length"] = tostring(#body)
-        request.source = ltn12.source.string(body)
+        headers["Content-Length"] = tostring(#body)
     elseif method == "POST" or method == "PUT" or method == "PATCH" then
         -- Some servers reject a bodyless POST that does not say so explicitly.
-        request.headers["Content-Length"] = "0"
+        headers["Content-Length"] = "0"
     end
 
-    logger.dbg("NeoDB:", method, url)
+    local origin = originOf(url)
+    local target, hops = url, 0
 
-    socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
-    local code, headers, status = socket.skip(1, http.request(request))
-    socketutil:reset_timeout()
+    while true do
+        local sink = {}
+        local request = {
+            url = target,
+            method = method,
+            headers = headers,
+            sink = ltn12.sink.table(sink),
+            -- We follow redirects ourselves. A merged catalog item answers with
+            -- one, and *that it happened* is information the caller needs; LuaSocket
+            -- would swallow it. It also declines to follow a redirected write at
+            -- all, which is exactly the case that matters, and how it resolves a
+            -- relative Location differs between the version KOReader bundles and
+            -- others.
+            redirect = false,
+        }
+        if body then request.source = ltn12.source.string(body) end
 
-    -- On a transport failure LuaSocket returns nil plus an error string, which
-    -- socket.skip shifts into `code`.
-    if headers == nil then
-        -- Whatever a previous call's server detail said, it is not an explanation
-        -- for this one -- and errorMessage would otherwise append it verbatim.
-        self.last_detail = nil
-        local reason = tostring(status or code or "unknown")
-        logger.err("NeoDB: request failed:", reason)
-        if reason:find(socketutil.TIMEOUT_CODE, 1, true)
-            or reason:find(socketutil.SINK_TIMEOUT_CODE, 1, true) then
-            return false, "timeout"
+        logger.dbg("NeoDB:", method, target)
+
+        socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
+        local code, response_headers, status = socket.skip(1, http.request(request))
+        socketutil:reset_timeout()
+
+        -- On a transport failure LuaSocket returns nil plus an error string, which
+        -- socket.skip shifts into `code`.
+        if response_headers == nil then
+            -- Whatever a previous call's server detail said, it is not an
+            -- explanation for this one -- and errorMessage would otherwise append
+            -- it verbatim.
+            self.last_detail = nil
+            local reason = tostring(status or code or "unknown")
+            logger.err("NeoDB: request failed:", reason)
+            if reason:find(socketutil.TIMEOUT_CODE, 1, true)
+                or reason:find(socketutil.SINK_TIMEOUT_CODE, 1, true) then
+                return false, "timeout"
+            end
+            return false, "network_error"
         end
-        return false, "network_error"
-    end
 
-    local content = table.concat(sink)
+        local content = table.concat(sink)
 
-    if code == 200 or code == 201 or code == 202 or code == 204 then
-        self.last_detail = nil
-        if content == "" then return true, {}, code end
-        local ok, decoded = pcall(JSON.decode, content)
-        if not ok or type(decoded) ~= "table" then
-            logger.err("NeoDB: unparseable response:", Util.ellipsize(content, 200))
-            return false, "bad_json", code
+        --[[--
+        A redirect, which for us means the item was merged into another one.
+
+        307 and 308 replay the method and body, which is what NeoDB uses for writes
+        precisely so a mark is not degraded into a GET. 301/302/303 are only
+        followed for reads: turning a write into a GET would silently drop it, so
+        surface it instead of guessing.
+        ]]
+        local follow
+        local redirected = code == 307 or code == 308
+            or ((code == 301 or code == 302 or code == 303)
+                and (method == "GET" or method == "HEAD"))
+        if redirected and hops < MAX_REDIRECTS then
+            local location = Api.resolveLocation(target, response_headers["location"])
+            -- Never carry the token to another host.
+            if location and originOf(location) == origin then follow = location end
         end
-        return true, Util.scrubNulls(decoded), code
-    end
 
-    self.last_detail = Api.explainErrorBody(content)
-    logger.err("NeoDB: HTTP", code, Util.ellipsize(content, 200))
-    if code == 401 then return false, "unauthorized", code end
-    if code == 403 then return false, "forbidden", code end
-    if code == 404 then return false, "not_found", code end
-    if code == 429 then return false, "rate_limited", code end
-    if type(code) == "number" and code >= 500 then return false, "server_error", code end
-    return false, "http_error", code
+        if follow then
+            hops = hops + 1
+            target = follow
+            self.final_url = follow
+            logger.dbg("NeoDB: following redirect to", follow)
+        elseif code == 200 or code == 201 or code == 202 or code == 204 then
+            self.last_detail = nil
+            if content == "" then return true, {}, code end
+            local ok, decoded = pcall(JSON.decode, content)
+            if not ok or type(decoded) ~= "table" then
+                logger.err("NeoDB: unparseable response:", Util.ellipsize(content, 200))
+                return false, "bad_json", code
+            end
+            return true, Util.scrubNulls(decoded), code
+        else
+            self.last_detail = Api.explainErrorBody(content)
+            logger.err("NeoDB: HTTP", code, Util.ellipsize(content, 200))
+            if code == 401 then return false, "unauthorized", code end
+            if code == 403 then return false, "forbidden", code end
+            if code == 404 then return false, "not_found", code end
+            if code == 429 then return false, "rate_limited", code end
+            if type(code) == "number" and code >= 500 then return false, "server_error", code end
+            return false, "http_error", code
+        end
+    end
 end
 
---- Same as `raw`, but resolves `path` against the configured instance.
+--[[--
+Same as `raw`, but resolves `path` against the configured instance.
+
+@treturn bool ok
+@treturn table|string body, or the error kind
+@treturn int|nil HTTP status
+@treturn string|nil the path this item now lives at, when it turned out to be merged
+]]
 function Api:call(method, path, opts)
     local instance = self.store:getInstance()
     if not instance then return false, "no_instance" end
-    return self:raw(method, instance .. path, opts)
+
+    local ok, data, code = self:raw(method, instance .. path, opts)
+
+    --[[--
+    NeoDB merges duplicate catalog entries, and afterwards the uuid we stored
+    answers with a redirect to whichever entry survived. Comparing the uuid we asked
+    about with the one we ended up at is how that becomes visible, and it costs
+    nothing when nothing has moved.
+    ]]
+    local moved_to
+    local final_path = Api.pathOf(self.final_url)
+    if final_path and final_path ~= path then
+        local from, to = Api.uuidFromPath(path), Api.uuidFromPath(final_path)
+        if from and to and from ~= to then
+            moved_to = final_path
+            logger.info("NeoDB: item", from, "is merged into", to)
+            -- The hook re-enters this method to refetch the survivor, so guard it.
+            if self.on_item_moved and not self.following_move then
+                self.following_move = true
+                local hook_ok, err = pcall(self.on_item_moved, from, to)
+                self.following_move = false
+                if not hook_ok then logger.err("NeoDB: on_item_moved failed:", tostring(err)) end
+            end
+        end
+    end
+
+    return ok, data, code, moved_to
 end
 
 --[[--
@@ -359,7 +479,10 @@ function Api:submit(op, is_online)
         return "queued"
     end
 
-    local ok, data, code = self:call(op.method, op.path, { json = op.body })
+    local ok, data, code, moved_to = self:call(op.method, op.path, { json = op.body })
+    -- The item was merged; keep the new address so a queued retry does not have to
+    -- rediscover it.
+    if moved_to then op.path = moved_to end
     if ok then return "sent", data end
 
     -- Only queue things that might succeed later. A 403 will still be a 403.
@@ -383,7 +506,10 @@ function Api:flushQueue()
 
     local remaining, sent, dropped = {}, 0, 0
     for _idx, op in ipairs(queue) do
-        local ok, data = self:call(op.method, op.path, { json = op.body })
+        local ok, data, _code, moved_to = self:call(op.method, op.path, { json = op.body })
+        -- Follow the item to wherever it was merged, so an op queued against a uuid
+        -- that has since been merged away is delivered instead of discarded.
+        if moved_to then op.path = moved_to end
         if ok then
             sent = sent + 1
         elseif data == "network_error" or data == "timeout" or data == "server_error" then
