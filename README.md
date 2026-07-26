@@ -24,7 +24,7 @@ ratings — without leaving the book.
 ## Install
 
 Download [the latest release](https://github.com/neodb-social/neodb.koplugin/archive/main.zip),
-unzip, and copy the whole `neodb.koplugin` folder into KOReader's `plugins` directory:
+unzip, rename the folder to `neodb.koplugin` and copy it into KOReader's `plugins` directory:
 
 | Device | Path |
 | --- | --- |
