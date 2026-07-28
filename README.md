@@ -90,7 +90,9 @@ a link made on one server will not be used to post to another.
 
 Everything is reachable from the book-actions sheet above, or from the menu:
 
-- **Reading status** — Want to read / Reading / Finished / Dropped.
+- **The top row** names where the book stands, and opens the shelf list that
+  changes it: Want to read / Reading / Finished / Dropped. Long-press it for the
+  book-actions sheet.
 - **Update progress** — pre-filled with where you actually are. See below.
 - **Rate and comment** — half-star rating from ½ to 5 starts, plus an optional comment.
 - **Add note** — a note against the book, optionally stamped with your position.
@@ -100,6 +102,30 @@ Everything is reachable from the book-actions sheet above, or from the menu:
 To share a quote, select the text and choose **Share on NeoDB** from the
 selection menu. The highlight is prefilled as a block quote with the cursor
 after it, ready for your own thought, and your reading position is attached.
+
+## Sharing every highlight
+
+Rather than picking quotes one at a time, a book can post them all as you make
+them: **NeoDB → This book → Upload new highlights and notes**. Each highlight or
+note you make in that book then becomes a NeoDB note — the passage, whatever you
+wrote about it, the chapter as the title, and the position it was made at.
+
+- What the book already holds is left alone. Only highlights made after you flip
+  the switch go out, so turning it on never empties a backlog into your timeline.
+  **NeoDB → Upload all highlights and notes…** is there for when the backlog *is*
+  what you wanted; past ten of them it asks first.
+- Nothing interrupts you, and nothing is announced. A batch is queued ten seconds
+  after you last touch your annotations, and never while a dialog is still open —
+  so the note you are writing goes out *with* its passage however long you take
+  over it. Come back to a highlight later, though, and the note you add then is not
+  sent; see the limitations below.
+- Offline is fine, as everywhere else: highlights queue and go out later.
+
+**Settings** holds the two globals. **Upload new highlights and notes** is what a
+book starts with when it is linked; every book keeps its own switch afterwards.
+**Crosspost shared highlights** decides whether these reach your followers — its
+own switch, separate from the ordinary crosspost setting and off by default, since
+a book read closely is a great many quotes.
 
 ## How progress is reported
 
@@ -141,8 +167,10 @@ is what sending it implies. A book already marked, including *Finished* or
 | Crosspost to connected social networks | off | Marks and notes always reach NeoDB; this also crossposts them to your connected Mastodon and/or Bluesky account. |
 | Quote highlights as block quotes | on | Prefixes shared highlights with `> `. |
 | Pairing service | `p.neodb.net` | Used by QR sign-in. Clear it to hide that option. |
-| Send progress when closing a book | off | Only for books already marked. Queued on close, uploaded later — closing a book never waits on the network. |
+| Update progress when closing a book | off | Only for books already marked. Queued on close, uploaded later — closing a book never waits on the network. |
 | Mark as Finished at the end of a book | off | Fires when you reach the last page of a linked book. |
+| Upload new highlights and notes | off | What a book starts with when it is linked; each book keeps its own switch under **This book**. See above. |
+| Crosspost shared highlights | off | Whether shared highlights also reach your followers. Separate from the crosspost row above. |
 
 ## Notes and limitations
 
@@ -157,6 +185,17 @@ is what sending it implies. A book already marked, including *Finished* or
   comment and tags you already had. If you edit a mark on the web while the book
   is open, use **Refresh from NeoDB** before changing it here.
 - When NeoDB merges two entries, the link follows the surviving one by itself.
+- A shared highlight is posted **once**, as it stands ten seconds after you last
+  touch it. Editing it afterwards, or adding a note to one that has already gone
+  out, changes nothing on NeoDB — KOReader does not even announce an edit to a
+  note's text. Deleting a highlight before its batch goes out does drop it. The id
+  NeoDB gives each note *is* recorded against the highlight that produced it,
+  which is what a later version would need to push an edit or a deletion through.
+  It reaches the book's sidecar whether that book is open, closed, or has been
+  renamed since the highlight was queued — in the last case when you next open it.
+- Renaming or deleting a book does not disturb anything waiting to upload: queued
+  notes are addressed to the NeoDB entry, not to the file. A book deleted along
+  with its sidecar loses its link, and nothing is written back to it.
 
 ## Layout
 
@@ -168,6 +207,7 @@ is what sending it implies. A book already marked, including *Finished* or
 | `neodb_login.lua` | Instance picker and the three sign-in flows |
 | `neodb_match.lua` | Book identification, search UI, link management |
 | `neodb_actions.lua` | Status, rating, progress, notes, quotes |
+| `neodb_annotations.lua` | Mirroring KOReader's own highlights and notes to NeoDB |
 | `neodb_util.lua` | ISBN checksums, star rendering, JSON-null scrubbing, helpers |
 
 Two things worth knowing before editing:

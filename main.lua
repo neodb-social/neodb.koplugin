@@ -29,6 +29,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Actions = require("neodb_actions")
+local Annotations = require("neodb_annotations")
 local Api = require("neodb_api")
 local Login = require("neodb_login")
 local Match = require("neodb_match")
@@ -38,6 +39,15 @@ local Util = require("neodb_util")
 local NeoDB = WidgetContainer:extend{
     name = "neodb",
 }
+
+--[[--
+How long the reader has to leave their annotations alone before we act on them.
+
+Only counts while nothing is on screen, so writing a note takes as long as it
+takes; this is the pause after the dialogs are gone, covering the reader who taps
+a highlight again to add a second thought to it.
+]]
+local ANNOTATION_SETTLE_SECONDS = 10
 
 function NeoDB:init()
     self.store = Store:new()
@@ -66,6 +76,19 @@ function NeoDB:init()
         Match.adoptMerge(self.ctx, old_uuid, new_uuid)
     end
 
+    --[[--
+    Wired for the same reason: a queued op cannot carry a callback, so the one
+    thing a shared highlight needs from its reply -- the note's uuid, which is
+    NeoDB's only handle for editing or deleting it later -- is collected here.
+
+    Deliberately not gated on a document being open. The queue can be drained from
+    the file browser, and a reply for a book that is merely closed is one we can
+    still file; `recordSent` works out where it goes.
+    ]]
+    self.api.on_op_sent = function(op, data)
+        Annotations.recordSent(self.ctx, op, data)
+    end
+
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
 
@@ -73,6 +96,9 @@ function NeoDB:init()
     -- where there is no book to mark.
     if self.ui.document then
         self:addHighlightAction()
+        -- One stable closure: UIManager matches scheduled tasks by identity, so
+        -- rescheduling a new one each time would leave the old ones to fire.
+        self.annotation_task = function() self:syncAnnotations() end
     end
 end
 
@@ -145,11 +171,13 @@ end
 
 -- Menu ----------------------------------------------------------------------
 
---- Short line describing the linked book, shown on the menu entry itself.
+--[[--
+Short line describing the open book's status, used as a menu label in its own right.
+
+Reader-only: the row it names is only built there, and in the file browser the
+account row already says what there is to say.
+]]
 function NeoDB:linkStatusText()
-    if not self:isReader() then
-        return self.store:isLoggedIn() and self.store:getAccountLabel() or _("Not signed in")
-    end
     if not self.store:isLoggedIn() then return _("Not signed in") end
 
     local link, foreign = self.store:getLink(self.ui.doc_settings)
@@ -185,19 +213,21 @@ function NeoDB:buildMenu()
     local ctx = self.ctx
     local items = {}
 
-    -- Status line, doubling as the entry point to the quick sheet.
-    table.insert(items, {
-        text_func = function() return self:linkStatusText() end,
-        enabled_func = function() return self:isReader() end,
-        keep_menu_open = false,
-        callback = function() Actions.showSheet(ctx) end,
-        separator = true,
-    })
-
     if self:isReader() then
+        --[[--
+        The status line and the shelf picker under it were two rows saying the same
+        thing, so this is one row: it states where the book stands and opens the
+        list that changes it.
+
+        The quick sheet it used to open moves to a long press. Nothing goes with
+        it -- every button on that sheet is also a row in this menu -- and it keeps
+        its gesture, which is where a sheet built for one-tap access belongs.
+        ]]
         table.insert(items, {
-            text = _("Reading status"),
+            text_func = function() return self:linkStatusText() end,
             sub_item_table_func = function() return self:shelfMenu() end,
+            hold_callback = function() Actions.showSheet(ctx) end,
+            hold_keep_menu_open = false,
         })
         table.insert(items, {
             text_func = function()
@@ -219,6 +249,15 @@ function NeoDB:buildMenu()
         table.insert(items, {
             text = _("This book"),
             sub_item_table_func = function() return self:linkMenu() end,
+        })
+        table.insert(items, {
+            text = _("Upload all highlights and notes…"),
+            help_text = _("Posts every highlight and note in this book that NeoDB has not been told about, however long ago you made it. Works whether the per-book switch under “This book” is on or not."),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
+            keep_menu_open = false,
+            callback = function() Annotations.uploadAll(ctx) end,
         })
     end
 
@@ -264,12 +303,7 @@ function NeoDB:shelfMenu()
             callback = function() Actions.setShelf(ctx, shelf) end,
         })
     end
-    table.insert(items, {
-        text = _("Remove mark from NeoDB…"),
-        separator = true,
-        keep_menu_open = false,
-        callback = function() Actions.removeMark(ctx) end,
-    })
+    -- Removing the mark lives under "This book", with the other undoing.
     return items
 end
 
@@ -296,6 +330,20 @@ function NeoDB:linkMenu()
             separator = true,
         },
         {
+            -- Same words as the global default in Settings: it is the same switch,
+            -- and this is the copy that decides.
+            text = _("Upload new highlights and notes"),
+            help_text = _("Posts every highlight and note you make in this book from now on to NeoDB, quietly and without asking: the passage, whatever you wrote about it, and where in the book it is. What the book already holds is left alone."),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
+            checked_func = function() return Annotations.isEnabled(ctx) end,
+            callback = function()
+                Annotations.setEnabled(ctx, not Annotations.isEnabled(ctx))
+            end,
+            separator = true,
+        },
+        {
             text = _("Show linked book"),
             enabled_func = function()
                 return self.store:getLink(self.ui.doc_settings) ~= nil
@@ -314,6 +362,21 @@ function NeoDB:linkMenu()
                     Util.notify(self:linkStatusText())
                 end)
             end,
+            separator = true,
+        },
+        --[[--
+        The two ways of undoing, kept together and kept last: one takes the mark off
+        NeoDB, the other forgets which entry this file belongs to. Neither belongs
+        among the shelves, where a mis-tap while changing a status was all it took.
+        ]]
+        {
+            text = _("Remove mark from NeoDB…"),
+            help_text = _("Deletes your status, rating and comment for this book from NeoDB. The book stays linked."),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
+            keep_menu_open = false,
+            callback = function() Actions.removeMark(ctx) end,
         },
         {
             text = _("Unlink this book…"),
@@ -412,20 +475,7 @@ function NeoDB:settingsMenu()
             sub_item_table = unit_items,
         },
         {
-            text = _("Crosspost to connected social networks"),
-            help_text = _("Marks, notes and reviews are always saved to NeoDB. This also announces them to your followers."),
-            checked_func = function() return store:get("post_to_fediverse") end,
-            callback = function() store:toggle("post_to_fediverse") end,
-        },
-        {
-            text = _("Quote highlights as block quotes"),
-            help_text = _("Prefixes shared highlights with \"> \" so they read as a quotation."),
-            checked_func = function() return store:get("quote_as_blockquote") end,
-            callback = function() store:toggle("quote_as_blockquote") end,
-            separator = true,
-        },
-        {
-            text = _("Send progress when closing a book"),
+            text = _("Update progress when closing a book"),
             help_text = _("Only for linked books, and only if the position moved. Queued silently; nothing is uploaded until you are next online."),
             checked_func = function() return store:get("auto_progress_on_close") end,
             callback = function() store:toggle("auto_progress_on_close") end,
@@ -435,6 +485,30 @@ function NeoDB:settingsMenu()
             help_text = _("When you reach the last page of a linked book, set its NeoDB status to Finished."),
             checked_func = function() return store:get("auto_mark_finished") end,
             callback = function() store:toggle("auto_mark_finished") end,
+        },
+        {
+            text = _("Upload new highlights and notes"),
+            help_text = _("What a book starts with when it is linked. Every highlight and note you then make in it is posted to NeoDB as a note. Each book keeps its own switch afterwards, under “This book”."),
+            checked_func = function() return store:get("auto_upload_annotations") end,
+            callback = function() store:toggle("auto_upload_annotations") end,
+        },
+        {
+            text = _("Quote highlights as block quotes"),
+            help_text = _("Prefixes shared highlights with \"> \" so they read as a quotation."),
+            checked_func = function() return store:get("quote_as_blockquote") end,
+            callback = function() store:toggle("quote_as_blockquote") end,
+        },
+        {
+            text = _("Crosspost to connected social networks"),
+            help_text = _("Marks, notes and reviews are always saved to NeoDB. This also announces them to your followers."),
+            checked_func = function() return store:get("post_to_fediverse") end,
+            callback = function() store:toggle("post_to_fediverse") end,
+        },
+        {
+            text = _("Crosspost shared highlights"),
+            help_text = _("Announces each shared highlight to your followers as well."),
+            checked_func = function() return store:get("crosspost_annotations") end,
+            callback = function() store:toggle("crosspost_annotations") end,
             separator = true,
         },
         {
@@ -517,14 +591,49 @@ function NeoDB:flushSoon()
 end
 
 --[[--
+Notices that the reader's own highlights changed.
+
+Nothing is decided here. KOReader announces a highlight the moment it saves one,
+which for "Add note" is before the note editor has even opened, and extending a
+selection deletes the annotation and makes a new one -- so we only note that
+something moved, and let it settle.
+]]
+function NeoDB:onAnnotationsModified()
+    if not self:isReader() then return end
+    if not Annotations.isEnabled(self.ctx) then return end
+    self:scheduleAnnotationSync()
+    -- Deliberately no `return true`: KOReader's own listeners want this too.
+end
+
+function NeoDB:scheduleAnnotationSync()
+    UIManager:unschedule(self.annotation_task)
+    UIManager:scheduleIn(ANNOTATION_SETTLE_SECONDS, self.annotation_task)
+end
+
+--[[--
+Queues whatever is new, once the reader is not in the middle of something.
+
+Anything on screen above the book means they are: the note editor is a dialog and
+its keyboard is another, so a quote queued while the note is still being typed
+would go out without it. Waiting costs nothing -- the timer comes round again.
+]]
+function NeoDB:syncAnnotations()
+    if not self:isReader() then return end
+    if UIManager.getTopmostVisibleWidget
+        and UIManager:getTopmostVisibleWidget() ~= self.ui then
+        return self:scheduleAnnotationSync()
+    end
+    if Annotations.queueNew(self.ctx) > 0 then self:flushSoon() end
+end
+
+--[[--
 Records progress when a linked book is closed.
 
 Queued, never sent from here: a request can block the UI thread for the length
 of its timeout, and closing a book must not stall on a bad connection. It goes
 out with the next upload instead.
 ]]
-function NeoDB:onCloseDocument()
-    if not self:isReader() then return end
+function NeoDB:queueClosingProgress()
     if not self.store:get("auto_progress_on_close") then return end
     if not self.store:isLoggedIn() then return end
 
@@ -550,6 +659,19 @@ function NeoDB:onCloseDocument()
     })
     self.store:cacheProgress(self.ui.doc_settings, progress_type, tostring(value))
     logger.dbg("NeoDB: queued closing progress", progress_type, value)
+end
+
+--[[--
+Last call before the book goes away.
+
+Both halves only queue, for the reason above, and the settle timer has to go: it
+would otherwise come round to a document that is no longer there.
+]]
+function NeoDB:onCloseDocument()
+    if not self:isReader() then return end
+    UIManager:unschedule(self.annotation_task)
+    Annotations.queueNew(self.ctx)
+    self:queueClosingProgress()
 end
 
 --[[--
@@ -590,12 +712,17 @@ function NeoDB:onEndOfBook()
 end
 
 --[[--
-Opportunistically drains the upload queue when opening a book.
+Housekeeping for the book that has just opened.
 
-No Wi-Fi is turned on for this and nothing is reported: it is housekeeping, and
-it only runs when the device happens to be connected already.
+No Wi-Fi is turned on for any of it and nothing is reported: the queue is only
+drained when the device happens to be connected already.
 ]]
 function NeoDB:onReaderReady()
+    -- A note uuid that could not be filed when its post went out, because this
+    -- book was closed or had moved. Opening it is the next chance to put the uuid
+    -- where an edit would go looking for it.
+    Annotations.adoptStashed(self.ctx)
+
     if self.store:queueCount() == 0 then return end
     if not self.store:isLoggedIn() then return end
     self:flushSoon()

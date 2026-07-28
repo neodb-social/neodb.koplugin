@@ -76,6 +76,17 @@ end
 
 Util.trim = util.trim
 
+--[[--
+Now, written the way KOReader stamps its annotations.
+
+Annotation `datetime` values are compared as plain strings -- which is the whole
+point of this format -- so anything compared against one has to be written the
+same way.
+]]
+function Util.timestamp()
+    return os.date("%Y-%m-%d %H:%M:%S")
+end
+
 --- Truncates on character (not byte) boundaries, so we never split a UTF-8 sequence.
 function Util.ellipsize(text, max_chars)
     text = Util.trim(text or "")

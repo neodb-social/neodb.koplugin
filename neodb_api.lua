@@ -464,6 +464,22 @@ end
 -- Write queue ---------------------------------------------------------------
 
 --[[--
+Announces that an op reached the server, and what came back.
+
+Some ops care about the reply. A note's uuid is the only handle NeoDB gives us for
+editing or deleting it later, and it does not exist until the post has gone out --
+which, for something that may have waited days in the queue, is nowhere near where
+the op was created. A queued op cannot carry a callback either, since the queue is
+written to disk, so the plugin wires one hook here, the same way it does for
+merged items.
+]]
+function Api:announceSent(op, data)
+    if not self.on_op_sent then return end
+    local ok, err = pcall(self.on_op_sent, op, data)
+    if not ok then logger.err("NeoDB: on_op_sent failed:", tostring(err)) end
+end
+
+--[[--
 Sends a write op, or queues it if the network is not cooperating.
 
 @param is_online pass the already-known state to skip a second connectivity
@@ -483,7 +499,10 @@ function Api:submit(op, is_online)
     -- The item was merged; keep the new address so a queued retry does not have to
     -- rediscover it.
     if moved_to then op.path = moved_to end
-    if ok then return "sent", data end
+    if ok then
+        self:announceSent(op, data)
+        return "sent", data
+    end
 
     -- Only queue things that might succeed later. A 403 will still be a 403.
     if data == "network_error" or data == "timeout" or data == "server_error" then
@@ -511,6 +530,7 @@ function Api:flushQueue()
         -- that has since been merged away is delivered instead of discarded.
         if moved_to then op.path = moved_to end
         if ok then
+            self:announceSent(op, data)
             sent = sent + 1
         elseif data == "network_error" or data == "timeout" or data == "server_error" then
             table.insert(remaining, op)

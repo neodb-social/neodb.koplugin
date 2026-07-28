@@ -15,6 +15,8 @@ local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
 local logger = require("logger")
 
+local Util = require("neodb_util")
+
 local Store = {}
 Store.__index = Store
 
@@ -26,6 +28,15 @@ local DEFAULTS = {
     auto_progress_on_close = false,
     auto_mark_finished     = false,
     quote_as_blockquote    = true,
+
+    --- Whether a newly linked book mirrors its highlights and notes to NeoDB.
+    --- Each book keeps its own switch; this is only what a new link starts with.
+    auto_upload_annotations = false,
+
+    --- Crossposting for shared highlights, deliberately separate from
+    --- `post_to_fediverse`: a book's worth of quotes is a different proposition
+    --- for whoever follows you than the marks and notes you write by hand.
+    crosspost_annotations   = false,
 
     --- Pairing service used by the QR sign-in. Point it at your own deployment
     --- if you would rather not involve a third party in the handshake.
@@ -182,6 +193,20 @@ end
 function Store:setLink(doc_settings, link)
     if not doc_settings then return end
     link.instance = link.instance or self:getInstance()
+
+    --[[--
+    The link is what the highlight mirror hangs off, so a book that has just
+    acquired one starts from the global preference -- and always with a starting
+    point, so that turning that preference on can never post highlights made
+    before anybody asked for it.
+    ]]
+    if link.annotation_sync == nil then
+        link.annotation_sync = {
+            enabled = self:get("auto_upload_annotations") == true,
+            since   = Util.timestamp(),
+        }
+    end
+
     doc_settings:saveSetting(LINK_KEY, link)
     -- Write it out now: a link is expensive to recreate by hand.
     doc_settings:flush()

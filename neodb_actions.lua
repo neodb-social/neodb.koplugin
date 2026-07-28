@@ -105,6 +105,52 @@ end
 
 -- Reading position ----------------------------------------------------------
 
+--- Whole percent, clamped, from a 0..1 fraction.
+local function wholePercent(fraction)
+    return math.max(0, math.min(100, math.floor((fraction or 0) * 100 + 0.5)))
+end
+
+--- Pages in the document, however this one counts them.
+local function pageCount(ui)
+    return ui.doc_settings and ui.doc_settings:readSetting("doc_pages")
+        or (ui.document and ui.document:getPageCount())
+end
+
+--[[--
+Whether this file carries publisher page numbers.
+
+An EPUB with a page map can report real printed page numbers, which are the one
+kind of page number that means something to other people.
+]]
+local function hasPageLabels(ui)
+    return ui.pagemap ~= nil and ui.pagemap.wantsPageLabels ~= nil
+        and ui.pagemap:wantsPageLabels()
+end
+
+--[[--
+Chooses the unit for a position we already hold both ways.
+
+Shared by the reader's own position and by an annotation's, so a shared quote and
+a progress update never disagree about what this book's page numbers are worth.
+]]
+local function inPreferredUnit(ctx, page, percent_int, label, total, force_unit)
+    local preference = force_unit or ctx.store:get("progress_unit")
+    if preference == "page" then
+        return "page", tostring(label or page or 1), total
+    elseif preference == "percentage" then
+        return "percentage", tostring(percent_int), total
+    end
+
+    if label then return "page", tostring(label), total end
+    if ctx.ui.paging then
+        -- Fixed-layout files (PDF, DjVu, CBZ): our page numbers are the book's.
+        return "page", tostring(page or 1), total
+    end
+    -- Reflowable text repaginates per device, font and margin, so our page
+    -- numbers would mean nothing to anyone else. Percentages travel.
+    return "percentage", tostring(percent_int), total
+end
+
 --[[--
 Works out what to report as the reader's position.
 
@@ -116,37 +162,39 @@ Works out what to report as the reader's position.
 function Actions.readingPosition(ctx, force_unit)
     local ui = ctx.ui
     local page = ui.getCurrentPage and ui:getCurrentPage() or nil
-    local total = ui.doc_settings and ui.doc_settings:readSetting("doc_pages")
-        or (ui.document and ui.document:getPageCount())
+    local total = pageCount(ui)
 
     local percent = ui.doc_settings and ui.doc_settings:readSetting("percent_finished")
     if not percent and page and total and total > 0 then
         percent = page / total
     end
-    local percent_int = math.max(0, math.min(100, math.floor((percent or 0) * 100 + 0.5)))
+    local label = hasPageLabels(ui) and ui.pagemap:getCurrentPageLabel(true) or nil
 
-    -- An EPUB carrying a publisher page map can report real printed page
-    -- numbers, which are meaningful to other people.
-    local label
-    if ui.pagemap and ui.pagemap.wantsPageLabels and ui.pagemap:wantsPageLabels() then
-        label = ui.pagemap:getCurrentPageLabel(true)
-    end
+    return inPreferredUnit(ctx, page, wholePercent(percent), label, total, force_unit)
+end
 
-    local preference = force_unit or ctx.store:get("progress_unit")
-    if preference == "page" then
-        return "page", tostring(label or page or 1), total
-    elseif preference == "percentage" then
-        return "percentage", tostring(percent_int), total
-    end
+--[[--
+Where an annotation sits, in the unit this book's progress is reported in.
 
-    if label then return "page", tostring(label), total end
-    if ui.paging then
-        -- Fixed-layout files (PDF, DjVu, CBZ): our page numbers are the book's.
-        return "page", tostring(page or 1), total
-    end
-    -- Reflowable text repaginates per device, font and margin, so our page
-    -- numbers would mean nothing to anyone else. Percentages travel.
-    return "percentage", tostring(percent_int), total
+The annotation's own place in the book, not the reader's: by the time a highlight
+is queued they have usually read on, and a quote stamped with wherever they happen
+to be now is worse than one carrying no position at all -- which is also what an
+annotation we cannot place gets.
+
+@treturn string|nil NeoDB progress type, or nil when the position is unknown
+@treturn string|nil value, as NeoDB wants it
+]]
+function Actions.annotationPosition(ctx, annotation)
+    local ui = ctx.ui
+    -- `pageref` is this annotation's own publisher page label, filled in by
+    -- KOReader when it made the annotation.
+    local label = hasPageLabels(ui) and annotation.pageref or nil
+    local page = tonumber(annotation.pageno)
+    if not page and not label then return nil end
+
+    local total = pageCount(ui)
+    local percent = (page and total and total > 0) and (page / total) or nil
+    return inPreferredUnit(ctx, page, wholePercent(percent), label, total)
 end
 
 function Actions.positionLabel(progress_type, value, total)
