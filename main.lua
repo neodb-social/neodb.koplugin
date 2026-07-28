@@ -2,7 +2,7 @@
 NeoDB for KOReader.
 
 Links the book you are reading to an entry on a NeoDB instance, then lets you
-set its reading status and progress and share notes, quotes, ratings and reviews
+set its reading status and progress and share notes, quotes, ratings and comments
 without leaving the book.
 
 Design notes, since e-readers are not phones:
@@ -244,11 +244,6 @@ function NeoDB:buildMenu()
         table.insert(items, {
             text = _("Add note…"),
             callback = function() Actions.addNote(ctx) end,
-            separator = true,
-        })
-        table.insert(items, {
-            text = _("This book"),
-            sub_item_table_func = function() return self:linkMenu() end,
         })
         table.insert(items, {
             text = _("Upload all highlights and notes…"),
@@ -258,6 +253,7 @@ function NeoDB:buildMenu()
             end,
             keep_menu_open = false,
             callback = function() Annotations.uploadAll(ctx) end,
+            separator = true,
         })
     end
 
@@ -279,6 +275,13 @@ function NeoDB:buildMenu()
         keep_menu_open = false,
         callback = function() Login.show(ctx) end,
     })
+
+    if self:isReader() then
+        table.insert(items, {
+            text = _("Settings for this book"),
+            sub_item_table_func = function() return self:linkMenu() end,
+        })
+    end
 
     table.insert(items, {
         text = _("Settings"),
@@ -311,28 +314,27 @@ function NeoDB:linkMenu()
     local ctx = self.ctx
     return {
         {
-            text = _("Find this book on NeoDB…"),
+            text = _("Show linked book"),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
             keep_menu_open = false,
-            callback = function() Match.autoMatch(ctx) end,
+            callback = function() Match.showLinkedInfo(ctx) end,
         },
         {
-            text = _("Search by title or author…"),
+            text = _("Refresh book info from NeoDB"),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
             keep_menu_open = false,
             callback = function()
-                local meta = Match.getBookMeta(self.ui)
-                Match.searchPrompt(ctx, meta.query)
+                Match.refreshMark(ctx, function()
+                    Util.notify(self:linkStatusText())
+                end)
             end,
         },
         {
-            text = _("Link by URL…"),
-            keep_menu_open = false,
-            callback = function() Match.promptUrl(ctx) end,
-            separator = true,
-        },
-        {
-            -- Same words as the global default in Settings: it is the same switch,
-            -- and this is the copy that decides.
-            text = _("Upload new highlights and notes"),
+            text = _("Upload new highlights and notes for this book"),
             help_text = _("Posts every highlight and note you make in this book from now on to NeoDB, quietly and without asking: the passage, whatever you wrote about it, and where in the book it is. What the book already holds is left alone."),
             enabled_func = function()
                 return self.store:getLink(self.ui.doc_settings) ~= nil
@@ -343,32 +345,6 @@ function NeoDB:linkMenu()
             end,
             separator = true,
         },
-        {
-            text = _("Show linked book"),
-            enabled_func = function()
-                return self.store:getLink(self.ui.doc_settings) ~= nil
-            end,
-            keep_menu_open = false,
-            callback = function() Match.showLinkedInfo(ctx) end,
-        },
-        {
-            text = _("Refresh status from NeoDB"),
-            enabled_func = function()
-                return self.store:getLink(self.ui.doc_settings) ~= nil
-            end,
-            keep_menu_open = false,
-            callback = function()
-                Match.refreshMark(ctx, function()
-                    Util.notify(self:linkStatusText())
-                end)
-            end,
-            separator = true,
-        },
-        --[[--
-        The two ways of undoing, kept together and kept last: one takes the mark off
-        NeoDB, the other forgets which entry this file belongs to. Neither belongs
-        among the shelves, where a mis-tap while changing a status was all it took.
-        ]]
         {
             text = _("Remove mark from NeoDB…"),
             help_text = _("Deletes your status, rating and comment for this book from NeoDB. The book stays linked."),
@@ -385,6 +361,25 @@ function NeoDB:linkMenu()
             end,
             keep_menu_open = false,
             callback = function() Match.unlink(ctx) end,
+        },
+        {
+            text = _("Find this book on NeoDB…"),
+            keep_menu_open = false,
+            callback = function() Match.autoMatch(ctx) end,
+        },
+        {
+            text = _("Find by title or author…"),
+            keep_menu_open = false,
+            callback = function()
+                local meta = Match.getBookMeta(self.ui)
+                Match.searchPrompt(ctx, meta.query)
+            end,
+        },
+        {
+            text = _("Link by URL…"),
+            keep_menu_open = false,
+            callback = function() Match.promptUrl(ctx) end,
+            separator = true,
         },
     }
 end
@@ -488,7 +483,7 @@ function NeoDB:settingsMenu()
         },
         {
             text = _("Upload new highlights and notes"),
-            help_text = _("What a book starts with when it is linked. Every highlight and note you then make in it is posted to NeoDB as a note. Each book keeps its own switch afterwards, under “This book”."),
+            help_text = _("What a book starts with when it is linked. Every highlight and note you then make in it is posted to NeoDB as a note."),
             checked_func = function() return store:get("auto_upload_annotations") end,
             callback = function() store:toggle("auto_upload_annotations") end,
         },
@@ -500,7 +495,7 @@ function NeoDB:settingsMenu()
         },
         {
             text = _("Crosspost to connected social networks"),
-            help_text = _("Marks, notes and reviews are always saved to NeoDB. This also announces them to your followers."),
+            help_text = _("Ratings, notes and comments are always saved to NeoDB. This also announces them to your followers."),
             checked_func = function() return store:get("post_to_fediverse") end,
             callback = function() store:toggle("post_to_fediverse") end,
         },
@@ -567,7 +562,7 @@ function NeoDB:settingsMenu()
 Instance: %1
 Account: %2
 
-Marks, notes and reviews are saved to your NeoDB account. Anything made while offline is queued and uploaded next time you are online.]]),
+Marks, notes and progresses are saved to your NeoDB account. Anything made while offline is queued and uploaded next time you are online.]]),
                     Util.instanceHost(store:getInstance() or "") ~= "" and Util.instanceHost(store:getInstance()) or _("not set"),
                     store:getAccountLabel() or _("not signed in")))
             end,
