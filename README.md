@@ -1,25 +1,21 @@
 # NeoDB for KOReader
 
-Link the book you are reading to an entry on a [NeoDB](https://neodb.net)
-instance, then set its reading status and progress and share notes, quotes and
-ratings — without leaving the book.
+This plugin links the book you are reading in KOReader to a book edition on a NeoDB
+server, then sync progress / notes / highlights / ratings, all without leaving the book.
 
-```
-┌─────────────────────────────────┐
-│       The Dispossessed          │
-│        Reading  ★★★½            │
-├────────────────┬────────────────┤
-│  Want to read  │  ✓ Reading     │
-├────────────────┼────────────────┤
-│  Finished      │  Dropped       │
-├────────────────┴────────────────┤
-│  Progress: 25%                  │
-├────────────────┬────────────────┤
-│  Rate & comment│  Add note      │
-├────────────────┼────────────────┤
-│  Book details  │  Refresh       │
-└────────────────┴────────────────┘
-```
+## What's NeoDB
+
+[NeoDB](https://neodb.net) is a free, open-sourced, distributed community, somewhat similar to Goodreads and
+StoryGraph, but many such self-hosted servers that interconnected via open protocols like 
+ActivityPub and ATProto. You may use NeoDB to share your reading journey with friends on 
+Mastodon and Bluesky, or use it purely for private reading log, as NeoDB's privacy settings 
+support both.
+
+## Screenshots
+
+| Link to a book | Rate and comment | Sync progress/highlights/etc |
+|:---:|:---:|:---:|
+| ![Link to a book](screenshots/link.png) | ![Rate and comment](screenshots/mark.png) | ![Options to sync highlights/etc](screenshots/options.png) |
 
 ## Install
 
@@ -93,39 +89,33 @@ Everything is reachable from the book-actions sheet above, or from the menu:
 - **The top row** names where the book stands, and opens the shelf list that
   changes it: Want to read / Reading / Finished / Dropped. Long-press it for the
   book-actions sheet.
-- **Update progress** — pre-filled with where you actually are. See below.
-- **Rate and comment** — half-star rating from ½ to 5 starts, plus an optional comment.
-- **Add note** — a note against the book, optionally stamped with your position.
-- **Book details** — what NeoDB knows about this edition, with a **Show QR code**
-  button to open the book's page on your phone.
+- **Update progress** — updates reading progress manually. See below.
+- **Rate and comment** — rating from ½ to 5 starts, plus an optional comment.
+- **Add note** — make a note, optionally stamped with your position.
+- **Settings for this book** — what NeoDB knows about this edition, with a 
+  **Show QR code** button to open the book's page on your phone.
 
-To share a quote, select the text and choose **Share on NeoDB** from the
+To share a quote manually, select the text and choose **Share on NeoDB** from the
 selection menu. The highlight is prefilled as a block quote with the cursor
 after it, ready for your own thought, and your reading position is attached.
 
 ## Sharing every highlight
 
 Rather than picking quotes one at a time, a book can post them all as you make
-them: **NeoDB → This book → Upload new highlights and notes**. Each highlight or
-note you make in that book then becomes a NeoDB note — the passage, whatever you
-wrote about it, the chapter as the title, and the position it was made at.
+highlights: **NeoDB → Settings for this book → [ ] Upload new highlights and notes**. 
+Check this, each highlight or note you make in this book will be sent to NeoDB as notes.
 
-- What the book already holds is left alone. Only highlights made after you flip
-  the switch go out, so turning it on never empties a backlog into your timeline.
-  **NeoDB → Upload all highlights and notes…** is there for when the backlog *is*
-  what you wanted; past ten of them it asks first.
-- Nothing interrupts you, and nothing is announced. A batch is queued ten seconds
-  after you last touch your annotations, and never while a dialog is still open —
-  so the note you are writing goes out *with* its passage however long you take
-  over it. Come back to a highlight later, though, and the note you add then is not
-  sent; see the limitations below.
-- Offline is fine, as everywhere else: highlights queue and go out later.
+- Previously notes and highlights are left alone. Only highlights made after you flip
+  the switch go out, so turning it on never flood a backlog into your timeline.
+  **NeoDB → Upload all highlights and notes…** will upload the backlog.
+- Upload is in background. An action is queued 10 seconds after you last make or update
+  your annotations.
+- Highlights done in offline will be queued and go out later.
 
-**Settings** holds the two globals. **Upload new highlights and notes** is what a
-book starts with when it is linked; every book keeps its own switch afterwards.
-**Crosspost shared highlights** decides whether these reach your followers — its
-own switch, separate from the ordinary crosspost setting and off by default, since
-a book read closely is a great many quotes.
+Setting **Upload new highlights and notes** globally decides the setting for a
+book when it's initially linked; every book keeps its own switch afterwards.
+**Crosspost shared highlights** decides whether these notes reach your followers on
+you connected Mastodon/Bluesky account.
 
 ## How progress is reported
 
@@ -172,7 +162,7 @@ is what sending it implies. A book already marked, including *Finished* or
 | Upload new highlights and notes | off | What a book starts with when it is linked; each book keeps its own switch under **This book**. See above. |
 | Crosspost shared highlights | off | Whether shared highlights also reach your followers. Separate from the crosspost row above. |
 
-## Notes and limitations
+## Technical notes and limitations
 
 - **Your token is stored in plain text** on device. Anyone with access to the
   device or a backup of it can read them. 
@@ -197,7 +187,7 @@ is what sending it implies. A book already marked, including *Finished* or
   notes are addressed to the NeoDB entry, not to the file. A book deleted along
   with its sidecar loses its link, and nothing is written back to it.
 
-## Layout
+## Source code layout
 
 | File | Contents |
 | --- | --- |
