@@ -225,6 +225,3 @@ Two things worth knowing before editing:
   directory on one shared `package.path`, where a generic `api.lua` would
   collide with another plugin's.
 
-## Licence
-
-AGPL-3.0
