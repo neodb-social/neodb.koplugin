@@ -19,8 +19,10 @@ Design notes, since e-readers are not phones:
 ]]
 
 local ConfirmBox = require("ui/widget/confirmbox")
+local Device = require("device")
 local Dispatcher = require("dispatcher")
 local InputDialog = require("ui/widget/inputdialog")
+local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
@@ -477,6 +479,55 @@ function NeoDB:queueMenu()
     return items
 end
 
+--- Where to send a reader who wants the whole story.
+local NEODB_HOME = "https://neodb.net"
+
+--[[--
+What NeoDB actually is, for whoever installed this without knowing.
+
+A TextViewer rather than the `Util.alert` the About row uses: this is a few hundred
+characters, and an InfoMessage does not scroll, so on a small screen the end of it
+would simply be off the bottom.
+
+The QR code and clipboard buttons are the two the linked-book sheet already offers,
+and are here for the same reason -- "learn more at a URL" is not something a device
+with no browser can act on by itself.
+]]
+local function showWhatIsNeoDB()
+    local viewer
+    local buttons = {{
+        {
+            text = _("Close"),
+            callback = function() UIManager:close(viewer) end,
+        },
+    }}
+    if Device:hasClipboard() then
+        table.insert(buttons, 1, {{
+            text = _("Copy link to clipboard"),
+            callback = function()
+                Util.copyToClipboard(NEODB_HOME)
+                Util.notify(_("Link copied."))
+            end,
+        }})
+    end
+    if Util.hasQRCode() then
+        table.insert(buttons, 1, {{
+            text = _("Show QR code"),
+            callback = function() Util.showQRCode(NEODB_HOME) end,
+        }})
+    end
+
+    viewer = TextViewer:new{
+        title = _("What is NeoDB"),
+        text = T(_([[NeoDB is a free open-sourced software and a distributed community, somewhat similar to Goodreads, but instead of being a single commercial service holding everyone's data, NeoDB is a network of self-hosted servers that interconnected via open protocols like ActivityPub and ATProto. You may use NeoDB to share your reading journey with friends on Mastodon and Bluesky, or use it purely for private reading log, as NeoDB's privacy setup supports both.
+
+Learn more at %1]]), NEODB_HOME),
+        text_type = "book_info",
+        buttons_table = buttons,
+    }
+    UIManager:show(viewer)
+end
+
 function NeoDB:settingsMenu()
     local store = self.store
     local ctx = self.ctx
@@ -625,6 +676,11 @@ Marks, notes and progresses are saved to your NeoDB account. Anything made while
                     Util.instanceHost(store:getInstance() or "") ~= "" and Util.instanceHost(store:getInstance()) or _("not set"),
                     store:getAccountLabel() or _("not signed in")))
             end,
+        },
+        {
+            text = _("What is NeoDB…"),
+            keep_menu_open = true,
+            callback = showWhatIsNeoDB,
         },
     }
 end
