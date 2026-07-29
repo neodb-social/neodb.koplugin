@@ -128,12 +128,32 @@ local function hasPageLabels(ui)
 end
 
 --[[--
+An annotation's publisher page label, for a book we cannot ask.
+
+`hasPageLabels` is the honest test, but it needs the open document's pagemap. For
+a book that is merely on the card, `pageref` is all there is -- and it is
+overloaded: `ReaderAnnotation:getPageRef` fills it with a page-map label when the
+file has one, but with a flow-relative "[3]1" when it has hidden flows and no page
+map. Posting that to NeoDB as a page number is worse than posting no position at
+all, so the bracketed form is refused.
+]]
+local function publisherLabel(annotation)
+    local label = annotation.pageref
+    if type(label) ~= "string" or label == "" then return nil end
+    if label:match("^%[") then return nil end
+    return label
+end
+
+--[[--
 Chooses the unit for a position we already hold both ways.
 
 Shared by the reader's own position and by an annotation's, so a shared quote and
 a progress update never disagree about what this book's page numbers are worth.
+
+`is_paging` is passed in rather than read off `ctx.ui`, because an annotation from
+a book that is not open has to answer the same question from what it wrote down.
 ]]
-local function inPreferredUnit(ctx, page, percent_int, label, total, force_unit)
+local function inPreferredUnit(ctx, page, percent_int, label, total, is_paging, force_unit)
     local preference = force_unit or ctx.store:get("progress_unit")
     if preference == "page" then
         return "page", tostring(label or page or 1), total
@@ -142,7 +162,7 @@ local function inPreferredUnit(ctx, page, percent_int, label, total, force_unit)
     end
 
     if label then return "page", tostring(label), total end
-    if ctx.ui.paging then
+    if is_paging then
         -- Fixed-layout files (PDF, DjVu, CBZ): our page numbers are the book's.
         return "page", tostring(page or 1), total
     end
@@ -170,7 +190,8 @@ function Actions.readingPosition(ctx, force_unit)
     end
     local label = hasPageLabels(ui) and ui.pagemap:getCurrentPageLabel(true) or nil
 
-    return inPreferredUnit(ctx, page, wholePercent(percent), label, total, force_unit)
+    return inPreferredUnit(ctx, page, wholePercent(percent), label, total,
+        ui.paging, force_unit)
 end
 
 --[[--
@@ -181,20 +202,37 @@ is queued they have usually read on, and a quote stamped with wherever they happ
 to be now is worse than one carrying no position at all -- which is also what an
 annotation we cannot place gets.
 
+@param book optional resolved book handle (see `neodb_annotations`); passing one
+            that is not the open document is what says "answer from the sidecar,
+            do not ask the reader's own document"
 @treturn string|nil NeoDB progress type, or nil when the position is unknown
 @treturn string|nil value, as NeoDB wants it
 ]]
-function Actions.annotationPosition(ctx, annotation)
-    local ui = ctx.ui
-    -- `pageref` is this annotation's own publisher page label, filled in by
-    -- KOReader when it made the annotation.
-    local label = hasPageLabels(ui) and annotation.pageref or nil
+function Actions.annotationPosition(ctx, annotation, book)
+    local label, total, is_paging
+    if book and not book.live then
+        label = publisherLabel(annotation)
+        total = book.pages
+        --[[--
+        `pageno` is an xpointer resolved to a page number for reflowable files and
+        the page itself for fixed-layout ones, so which of the two this is can be
+        read straight off `page`: a number means the file paginates for itself.
+        ]]
+        is_paging = type(annotation.page) == "number"
+    else
+        local ui = ctx.ui
+        -- `pageref` is this annotation's own publisher page label, filled in by
+        -- KOReader when it made the annotation.
+        label = hasPageLabels(ui) and annotation.pageref or nil
+        total = pageCount(ui)
+        is_paging = ui.paging
+    end
+
     local page = tonumber(annotation.pageno)
     if not page and not label then return nil end
 
-    local total = pageCount(ui)
     local percent = (page and total and total > 0) and (page / total) or nil
-    return inPreferredUnit(ctx, page, wholePercent(percent), label, total)
+    return inPreferredUnit(ctx, page, wholePercent(percent), label, total, is_paging)
 end
 
 function Actions.positionLabel(progress_type, value, total)
@@ -773,6 +811,23 @@ function Actions.addNote(ctx, opts)
 end
 
 -- Upload queue --------------------------------------------------------------
+
+--[[--
+Uploads the queue after the current screen has been drawn, if we can.
+
+Deliberately silent and deliberately not `whenOnline`: this is the background
+path, and a sync nobody asked for must never turn a radio on or raise a dialog.
+Next tick rather than now so whatever prompted it gets painted first -- a request
+blocks the UI thread for as long as its timeout.
+]]
+function Actions.flushSoon(ctx)
+    if not Util.isOnline() then return end
+    UIManager:nextTick(function()
+        local sent, remaining, dropped = ctx.api:flushQueue()
+        logger.dbg("NeoDB: flushed queue,", sent, "sent,", remaining, "left,",
+            dropped, "dropped")
+    end)
+end
 
 function Actions.flushQueue(ctx, quiet, on_done)
     local pending = ctx.store:queueCount()

@@ -117,6 +117,43 @@ book when it's initially linked; every book keeps its own switch afterwards.
 **Crosspost shared highlights** decides whether these notes reach your followers on
 you connected Mastodon/Bluesky account.
 
+## Using KOReader's own "Export highlights"
+
+NeoDB also registers itself as a target in KOReader's built-in exporter, so it
+appears in **☰ → Tools → Export highlights → Choose formats and services**
+alongside Markdown, JSON and Readwise. Tick it once — it asks first — and every
+one of the exporter's own entry points can post to NeoDB:
+
+- **Export all notes in current book**
+- **Export all notes in all books in history**
+- **Export highlights** on a multi-selection in the file browser
+- the matching gesture and profile actions
+
+This is the only path that reaches many books at once, and the only one that works
+from the file browser. It also honours the exporter's own **Filter by highlight
+style** and **Filter by highlight colour**, so you can post only the highlights in
+one colour.
+
+Worth knowing:
+
+- **Only books linked to a NeoDB entry are posted from.** Unlinked books are
+  skipped, and the count is reported. Nothing goes looking for matches on its own.
+- **A highlight is still posted only once.** KOReader's exporter re-sends
+  everything every time it runs, but this plugin keeps its own record per book, so
+  exporting the same book twice adds nothing the second time.
+- Exporting posts from a linked book **whether or not that book's own "Upload new
+  highlights and notes" switch is on**. That switch governs the silent automatic
+  mirror; choosing to export is a deliberate act.
+- KOReader exports to every enabled target at once, so with NeoDB ticked, an
+  export to Markdown will also post to NeoDB — and will want a network connection.
+  Untick NeoDB when you only want a file.
+- The upload queue holds 100 items. A backlog larger than that is queued 100 at a
+  time: the rest is left untouched and the notification tells you to export again
+  once those have gone up, which continues exactly where it stopped.
+- Needs KOReader **v2025.04** or newer, which is where the exporter gained a way
+  for plugins to add targets. On older builds nothing appears, and the plugin's own
+  **Upload all highlights and notes…** does the same job for one book.
+
 ## How progress is reported
 
 NeoDB accepts a page number or a percentage. Which one is right depends on the
@@ -198,6 +235,7 @@ is what sending it implies. A book already marked, including *Finished* or
 | `neodb_match.lua` | Book identification, search UI, link management |
 | `neodb_actions.lua` | Status, rating, progress, notes, quotes |
 | `neodb_annotations.lua` | Mirroring KOReader's own highlights and notes to NeoDB |
+| `neodb_exporter.lua` | NeoDB as a target in KOReader's "Export highlights" |
 | `neodb_util.lua` | ISBN checksums, star rendering, JSON-null scrubbing, helpers |
 
 Two things worth knowing before editing:

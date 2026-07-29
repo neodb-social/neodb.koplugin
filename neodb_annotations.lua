@@ -16,7 +16,14 @@ Two rules follow from that:
   twice is posted once.
 * **What a book already holds is left alone.** The state records when the switch
   was turned on; a preference nobody had yet cannot be what a year of highlights
-  was made under. `uploadAll` is the deliberate exception.
+  was made under. `uploadAll` and the exporter target are the deliberate
+  exceptions.
+
+Everything here works through a *book handle* (`resolveBook`), because the reply to
+a post usually arrives while some other book is open, or none at all, and because
+KOReader's exporter hands us whole shelves of books that are not open. The handle
+is what decides -- once, and never at a call site -- which `DocSettings` it is safe
+to write to.
 
 @module koplugin.neodb.annotations
 ]]
@@ -66,16 +73,111 @@ local function sentTable(state)
     return {}
 end
 
---- The open book's link and its sync state, or nil when it is not linked.
-local function linkedState(ctx)
-    local link = ctx.store:getLink(ctx.ui and ctx.ui.doc_settings)
-    if not link then return nil end
-    return link, syncState(link)
+-- Book handles ---------------------------------------------------------------
+
+--[[--
+A book, and the one `DocSettings` it is safe to write to.
+
+    file          the document's path, as far as we know it
+    doc_settings  where its link lives
+    live          true when this is KOReader's own instance for the open book
+    pages         how many pages it was last counted to have
+
+`DocSettings:open` hands out a **fresh instance every call**; there is no cache.
+Opening a second one for the book KOReader has open means its live copy is written
+back over ours when the book closes -- silent loss, hours later. Which route to
+take is therefore decided here and never left to a caller: the reader can unlink a
+book while its notes are still queued, which leaves a caller unable to recognise
+even its own open book.
+
+@param file document path, or nil for whatever is open
+@treturn table|nil handle, or nil when there is nothing safe to touch
+]]
+local function resolveBook(ctx, file)
+    local ui = ctx.ui
+    local open_file = ui and ui.document and ui.document.file
+
+    if file == nil or (open_file ~= nil and file == open_file) then
+        if not (ui and ui.doc_settings) then return nil end
+        return {
+            file         = open_file,
+            doc_settings = ui.doc_settings,
+            live         = true,
+            pages        = ui.doc_settings:readSetting("doc_pages"),
+        }
+    end
+
+    -- `getSidecarFilename` calls `:match` on the path, so a non-string throws.
+    if type(file) ~= "string" or file == "" then return nil end
+
+    --[[--
+    `DocSettings:open` on a path with no sidecar *invents* one, and `flush` would
+    then write it out -- giving a book that has been deleted a fresh metadata file.
+    ]]
+    if not DocSettings:hasSidecarFile(file) then return nil end
+
+    local doc_settings = DocSettings:open(file)
+    if not doc_settings then return nil end
+    return {
+        file         = file,
+        doc_settings = doc_settings,
+        live         = false,
+        -- No default argument: `readSetting` installs a truthy default, and
+        -- `saveState` flushes, so a default would grow the sidecar a stale key.
+        pages        = doc_settings:readSetting("doc_pages"),
+    }
 end
 
+--[[--
+The same, but only for a book that is actually linked to something postable.
+
+@param expect_uuid optional NeoDB uuid the link must still match, for when a path
+                   may have been taken over by a different book since
+]]
+local function linkedBook(ctx, file, expect_uuid)
+    local book = resolveBook(ctx, file)
+    if not book then return nil end
+
+    -- Also nil for a book linked to a different instance, which is what we want:
+    -- its uuid means nothing on the server we are signed in to.
+    local link = ctx.store:getLink(book.doc_settings)
+    if not link then return nil end
+    if expect_uuid and link.uuid ~= expect_uuid then return nil end
+
+    book.link = link
+    book.state = syncState(link)
+    return book
+end
+
+--[[--
+Writes a handle's sync state back to its book.
+
+Assigning `annotation_sync` before `setLink` is the point: `setLink` seeds a fresh
+one for a link that has none, and would otherwise replace everything recorded
+here. For a `DocSettings` this saves *and* flushes, so the sidecar is on disk when
+this returns.
+]]
+local function saveState(ctx, book)
+    book.link.annotation_sync = book.state
+    ctx.store:setLink(book.doc_settings, book.link)
+end
+
+--- The annotations a book holds, from wherever this one keeps them.
+local function annotationList(ctx, book)
+    local annotations
+    if book.live then
+        annotations = ctx.ui.annotation and ctx.ui.annotation.annotations
+    else
+        annotations = book.doc_settings:readSetting("annotations")
+    end
+    return type(annotations) == "table" and annotations or {}
+end
+
+-- The per-book switch --------------------------------------------------------
+
 function Annotations.isEnabled(ctx)
-    local link, state = linkedState(ctx)
-    return link ~= nil and state.enabled == true
+    local book = linkedBook(ctx, nil)
+    return book ~= nil and book.state.enabled == true
 end
 
 --[[--
@@ -87,16 +189,15 @@ a timeline is not one anybody flips twice. "Upload all" is there for when that
 backlog is what they actually wanted.
 ]]
 function Annotations.setEnabled(ctx, enabled)
-    local link, state = linkedState(ctx)
-    if not link then return false end
+    local book = linkedBook(ctx, nil)
+    if not book then return false end
 
     enabled = enabled == true
-    if enabled and not state.enabled then
-        state.since = Util.timestamp()
+    if enabled and not book.state.enabled then
+        book.state.since = Util.timestamp()
     end
-    state.enabled = enabled
-    link.annotation_sync = state
-    ctx.store:setLink(ctx.ui.doc_settings, link)
+    book.state.enabled = enabled
+    saveState(ctx, book)
     return enabled
 end
 
@@ -120,14 +221,11 @@ The annotations NeoDB has not been told about, in the order the book holds them.
 @param include_backlog drop the "only what came after the switch" cutoff, for when
                        the reader has asked for everything on purpose
 ]]
-local function pending(ctx, state, include_backlog)
-    local annotations = ctx.ui.annotation and ctx.ui.annotation.annotations
-    if type(annotations) ~= "table" then return {} end
-
-    local sent = sentTable(state)
-    local since = include_backlog and "" or (state.since or "")
+local function pending(ctx, book, include_backlog)
+    local sent = sentTable(book.state)
+    local since = include_backlog and "" or (book.state.since or "")
     local list = {}
-    for _idx, annotation in ipairs(annotations) do
+    for _idx, annotation in ipairs(annotationList(ctx, book)) do
         local created = annotation.datetime
         -- Compared as strings, which is what KOReader's timestamp format is for.
         if type(created) == "string" and created > since
@@ -144,8 +242,10 @@ The NeoDB note for one KOReader annotation.
 Shaped like what the "Share on NeoDB" composer produces, so an automatic post and
 a hand-made one read alike: the passage as a quote, the reader's own note under
 it, and the position it was made at attached.
+
+@param book optional handle, so a book that is not open can still be placed
 ]]
-function Annotations.noteBody(ctx, annotation)
+function Annotations.noteBody(ctx, annotation, book)
     local parts = {}
 
     local quote = Util.trim(annotation.text or "")
@@ -172,7 +272,7 @@ function Annotations.noteBody(ctx, annotation)
         sensitive         = false,
     }
 
-    local progress_type, value = Actions.annotationPosition(ctx, annotation)
+    local progress_type, value = Actions.annotationPosition(ctx, annotation, book)
     if progress_type then
         body.progress_type  = progress_type
         body.progress_value = tostring(value)
@@ -192,20 +292,25 @@ op the queue eventually gives up on. The alternative costs worse: a book whose
 notes went out while it was closed would come back looking untouched, and post
 every one of them again.
 
+Only what the queue actually accepted is marked. A full queue therefore means the
+tail of a batch stays outstanding rather than being recorded as sent and never
+posted, and the next attempt picks up exactly there.
+
 @treturn int how many were queued
 ]]
-local function enqueueAll(ctx, link, state, list)
-    local sent = sentTable(state)
+function Annotations.queueFor(ctx, book, list)
+    if #list == 0 then return 0 end
+
+    local ops = {}
     for _idx, annotation in ipairs(list) do
-        local created = annotation.datetime
-        ctx.store:enqueue({
+        table.insert(ops, {
             method = "POST",
-            path   = ctx.api:notePath(link.uuid),
-            body   = Annotations.noteBody(ctx, annotation),
-            label  = T(_("Highlight from “%1”"), link.title or "?"),
+            path   = ctx.api:notePath(book.link.uuid),
+            body   = Annotations.noteBody(ctx, annotation, book),
+            label  = T(_("Highlight from “%1”"), book.link.title or "?"),
             -- Marked sent below, so this key should not come round again -- but
             -- if it somehow does, one post is the right answer, not two.
-            dedup  = "annotation:" .. link.uuid .. ":" .. created,
+            dedup  = "annotation:" .. book.link.uuid .. ":" .. annotation.datetime,
             --[[--
             Plain data, because the queue is written to disk: this is how the reply
             is matched back to the annotation that caused it. `file` names the book
@@ -214,19 +319,28 @@ local function enqueueAll(ctx, link, state, list)
             have been renamed or deleted.
             ]]
             annotation = {
-                item = link.uuid,
-                key  = created,
-                file = ctx.ui.document and ctx.ui.document.file or nil,
+                item = book.link.uuid,
+                key  = annotation.datetime,
+                file = book.file,
             },
         })
-        sent[created] = true
     end
 
-    state.sent = sent
-    link.annotation_sync = state
-    ctx.store:setLink(ctx.ui.doc_settings, link)
-    logger.dbg("NeoDB: queued", #list, "annotation(s) for", link.title)
-    return #list
+    local accepted = ctx.store:enqueueAll(ops)
+    if accepted == 0 then
+        logger.warn("NeoDB: queue full, none of", #ops, "annotation(s) taken")
+        return 0
+    end
+
+    local sent = sentTable(book.state)
+    for i = 1, accepted do
+        sent[ops[i].annotation.key] = true
+    end
+    book.state.sent = sent
+    saveState(ctx, book)
+    logger.dbg("NeoDB: queued", accepted, "of", #ops, "annotation(s) for",
+        book.link.title)
+    return accepted
 end
 
 -- Filing the uuid a posted note comes back with --------------------------------
@@ -267,58 +381,17 @@ local function stash(ctx, entry)
 end
 
 --[[--
-Writes a note uuid into the sidecar of a book KOReader does not have open.
-
-`DocSettings:open` hands out a fresh instance every time, so this must never run
-for the open book: the live instance holds its own copy of the same data and would
-write it back over ours when the book closes. The caller checks that first.
-
-Gated on the sidecar already existing, because `DocSettings:open` on a path with
-none would invent one, and a book that has been deleted should not be given a new
-metadata file. The link is checked too, so a path since taken by a different book
-is left alone.
-
-@treturn bool whether the uuid was filed
-]]
-local function writeToClosedBook(ctx, tag, record)
-    if type(tag.file) ~= "string" or tag.file == "" then return false end
-
-    --[[--
-    Checked here rather than trusted to the caller. The reader can unlink a book
-    while its notes are still queued, which leaves the caller unable to recognise
-    its own open book -- and the cost of getting this wrong is not an error but
-    silent loss, hours later, when KOReader writes its copy back over ours.
-    ]]
-    local open_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
-    if open_file and open_file == tag.file then return false end
-
-    if not DocSettings:hasSidecarFile(tag.file) then return false end
-
-    local doc_settings = DocSettings:open(tag.file)
-    if not doc_settings then return false end
-
-    local link = ctx.store:getLink(doc_settings)
-    if not link or link.uuid ~= tag.item then return false end
-
-    local state = syncState(link)
-    local sent = sentTable(state)
-    sent[tag.key] = record
-    state.sent = sent
-    link.annotation_sync = state
-    -- Saves and flushes, which for a DocSettings is the sidecar written out.
-    ctx.store:setLink(doc_settings, link)
-    return true
-end
-
---[[--
 Files the uuid NeoDB gave a note we posted.
 
-Three ways this can land, in order of preference:
+`linkedBook` sorts out where it goes: the live sidecar when that book is open, its
+own sidecar when it is merely closed, and nothing at all when it has been renamed,
+moved or deleted -- in which case the uuid waits in the stash until that book is
+opened again.
 
-1. the book is open, so its live sidecar is the only one safe to touch;
-2. it is closed but still where we left it, so its sidecar is written directly;
-3. it has been renamed, moved or deleted, so the uuid waits in the stash until
-   that book is opened again.
+Matched on the file rather than the item, because two copies of one book share a
+NeoDB entry but not their annotations, so the uuid has to reach the copy it came
+from. Ops queued before `file` was recorded fall back to the open book, which is
+what `linkedBook(ctx, nil, item)` checks.
 ]]
 function Annotations.recordSent(ctx, op, data)
     local tag = type(op) == "table" and op.annotation or nil
@@ -329,33 +402,22 @@ function Annotations.recordSent(ctx, op, data)
         at   = Util.timestamp(),
     }
 
-    local open_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
-    local link, state = linkedState(ctx)
-    --[[--
-    Matched on the file rather than the item: two copies of one book share a NeoDB
-    entry but not their annotations, so the uuid has to go to the copy it came
-    from. Ops queued before `file` was recorded fall back to the item.
-    ]]
-    local is_open_book = link ~= nil
-        and (tag.file and tag.file == open_file or (not tag.file and link.uuid == tag.item))
-
-    if is_open_book then
-        local sent = sentTable(state)
-        sent[tag.key] = record
-        state.sent = sent
-        link.annotation_sync = state
-        ctx.store:setLink(ctx.ui.doc_settings, link)
-        return
-    end
-
     -- Touching the filesystem, so failure is a real possibility: a read-only card
     -- or an unplugged one must fall through to the stash, not lose the uuid.
-    local ok, filed = pcall(writeToClosedBook, ctx, tag, record)
+    local ok, filed = pcall(function()
+        local book = linkedBook(ctx, tag.file, tag.item)
+        if not book then return false end
+        local sent = sentTable(book.state)
+        sent[tag.key] = record
+        book.state.sent = sent
+        saveState(ctx, book)
+        return true
+    end)
     if not ok then
         logger.warn("NeoDB: could not write", tostring(tag.file), "-", tostring(filed))
-        filed = false
+    elseif filed then
+        return
     end
-    if filed then return end
 
     stash(ctx, { item = tag.item, key = tag.key, uuid = record.uuid, at = record.at })
     logger.dbg("NeoDB: stashed a note uuid until its book turns up again")
@@ -370,13 +432,13 @@ function Annotations.adoptStashed(ctx)
     local list = ctx.store:get(STASH_KEY)
     if type(list) ~= "table" or #list == 0 then return 0 end
 
-    local link, state = linkedState(ctx)
-    if not link then return 0 end
+    local book = linkedBook(ctx, nil)
+    if not book then return 0 end
 
-    local sent = sentTable(state)
+    local sent = sentTable(book.state)
     local keep, adopted = {}, 0
     for _idx, entry in ipairs(list) do
-        if type(entry) == "table" and entry.item == link.uuid
+        if type(entry) == "table" and entry.item == book.link.uuid
             and type(entry.key) == "string" then
             sent[entry.key] = { uuid = entry.uuid, at = entry.at }
             adopted = adopted + 1
@@ -386,13 +448,14 @@ function Annotations.adoptStashed(ctx)
     end
     if adopted == 0 then return 0 end
 
-    state.sent = sent
-    link.annotation_sync = state
-    ctx.store:setLink(ctx.ui.doc_settings, link)
+    book.state.sent = sent
+    saveState(ctx, book)
     ctx.store:set(STASH_KEY, keep)
     logger.dbg("NeoDB: adopted", adopted, "stashed note uuid(s)")
     return adopted
 end
+
+-- Posting --------------------------------------------------------------------
 
 --[[--
 Queues the annotations made since the switch was turned on.
@@ -402,25 +465,22 @@ Queues the annotations made since the switch was turned on.
 function Annotations.queueNew(ctx)
     if not ctx.store:isLoggedIn() then return 0 end
 
-    local link, state = linkedState(ctx)
-    if not link or not state.enabled then return 0 end
+    local book = linkedBook(ctx, nil)
+    if not book or not book.state.enabled then return 0 end
 
     --[[--
     A switch that is on with nothing to measure against would treat the whole book
     as new. Nothing should be able to leave it in that state, but the failure would
     be a few hundred posts, so repair it and wait for the next round.
     ]]
-    if not state.since then
+    if not book.state.since then
         logger.warn("NeoDB: annotation sync had no start point; stamping now")
-        state.since = Util.timestamp()
-        link.annotation_sync = state
-        ctx.store:setLink(ctx.ui.doc_settings, link)
+        book.state.since = Util.timestamp()
+        saveState(ctx, book)
         return 0
     end
 
-    local list = pending(ctx, state, false)
-    if #list == 0 then return 0 end
-    return enqueueAll(ctx, link, state, list)
+    return Annotations.queueFor(ctx, book, pending(ctx, book, false))
 end
 
 --[[--
@@ -431,16 +491,18 @@ whether it is on at all: asking for the backlog is the whole point, and it is th
 one case where posting what came before the switch is what the reader meant.
 ]]
 function Annotations.uploadAll(ctx)
-    Actions.requireLink(ctx, function(link)
-        local state = syncState(link)
-        local list = pending(ctx, state, true)
+    Actions.requireLink(ctx, function()
+        local book = linkedBook(ctx, nil)
+        if not book then return end
+
+        local list = pending(ctx, book, true)
         if #list == 0 then
             Util.notify(_("NeoDB already has every highlight in this book."))
             return
         end
 
         local function go()
-            enqueueAll(ctx, link, state, list)
+            Annotations.queueFor(ctx, book, list)
             Actions.flushQueue(ctx, false)
         end
 
@@ -452,7 +514,7 @@ function Annotations.uploadAll(ctx)
         posts from one tap, and it cannot be taken back from the reader's side.
         ]]
         local warning = T(_("Post %1 highlights and notes from “%2” to NeoDB?\n\nEach one becomes a separate note, and they cannot be taken back from here."),
-            tostring(#list), Util.ellipsize(link.title or "?", 40))
+            tostring(#list), Util.ellipsize(book.link.title or "?", 40))
         if ctx.store:get("crosspost_annotations") then
             warning = warning .. "\n\n"
                 .. _("Crossposting shared highlights is on, so your followers will see all of them.")
@@ -463,6 +525,45 @@ function Annotations.uploadAll(ctx)
             ok_callback = go,
         })
     end)
+end
+
+-- For KOReader's own "Export highlights" -------------------------------------
+
+--[[--
+The link and sync state of a book named by path, or nil when nothing can be posted.
+
+Nil covers every reason at once -- not linked, linked to another instance, no
+sidecar, path since taken by a different book -- because the caller's answer to
+all of them is the same: skip this book.
+]]
+function Annotations.bookAt(ctx, file)
+    return linkedBook(ctx, file)
+end
+
+--[[--
+The annotations named by `keys` that NeoDB has not been told about, in book order.
+
+`keys` is a set of creation timestamps, which is how a caller working from
+something other than the annotation list says which ones it means -- KOReader's
+exporter hands over its own filtered *clippings*, which carry no identity beyond
+when they were made.
+
+The book's own list still decides. It is the only place that knows how each
+annotation ended up, and `isShareable` still applies: the exporter's filter only
+looks at `drawer`, so the scaffolding KOReader leaves behind mid-drag would
+otherwise be posted.
+]]
+function Annotations.unsentAt(ctx, book, keys)
+    local sent = sentTable(book.state)
+    local list = {}
+    for _idx, annotation in ipairs(annotationList(ctx, book)) do
+        local created = annotation.datetime
+        if type(created) == "string" and keys[created]
+            and sent[created] == nil and isShareable(annotation) then
+            table.insert(list, annotation)
+        end
+    end
+    return list
 end
 
 return Annotations

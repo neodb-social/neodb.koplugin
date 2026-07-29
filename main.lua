@@ -31,6 +31,7 @@ local T = require("ffi/util").template
 local Actions = require("neodb_actions")
 local Annotations = require("neodb_annotations")
 local Api = require("neodb_api")
+local ExportTarget = require("neodb_exporter")
 local Login = require("neodb_login")
 local Match = require("neodb_match")
 local Store = require("neodb_store")
@@ -39,6 +40,26 @@ local Util = require("neodb_util")
 local NeoDB = WidgetContainer:extend{
     name = "neodb",
 }
+
+--[[--
+Offers NeoDB to KOReader's own "Export highlights".
+
+Registered here, in the module body, rather than from `init`. The exporter builds
+its list of targets in its own `init`, and it is constructed before we are --
+plugins are loaded in path order, and `exporter.koplugin` sorts before
+`neodb.koplugin`. Registering any later would leave us out of that first list, and
+so out of `isReady`, out of `requiresNetwork`, and out of both gesture actions,
+until the reader happened to open the export menu once and it was rebuilt. Module
+load is the last moment early enough, and a disabled plugin never gets this far, so
+nothing can leave a row behind for a plugin that is switched off.
+
+`provider` only exists from KOReader v2025.04, and there is nothing to be done on
+an older build but carry on without the target.
+]]
+local provider_ok, Provider = pcall(require, "provider")
+if provider_ok and type(Provider) == "table" and Provider.register then
+    Provider:register("exporter", ExportTarget.name, ExportTarget)
+end
 
 --[[--
 How long the reader has to leave their annotations alone before we act on them.
@@ -100,6 +121,18 @@ function NeoDB:init()
         -- rescheduling a new one each time would leave the old ones to fire.
         self.annotation_task = function() self:syncAnnotations() end
     end
+
+    --[[--
+    The export target outlives any one of these objects, so it is lent the context
+    belonging to whichever is current. Not gated on a document: exporting a
+    multi-select happens in the file browser.
+    ]]
+    ExportTarget:attach(self.ctx)
+end
+
+--- Takes the lent context back, so a torn-down UI cannot be exported through.
+function NeoDB:onCloseWidget()
+    ExportTarget:detach(self.ctx)
 end
 
 function NeoDB:isReader()
@@ -578,11 +611,7 @@ end
 
 --- Uploads the queue after the current screen has been drawn, if we can.
 function NeoDB:flushSoon()
-    if not Util.isOnline() then return end
-    UIManager:nextTick(function()
-        local sent, remaining, dropped = self.api:flushQueue()
-        logger.dbg("NeoDB: flushed queue,", sent, "sent,", remaining, "left,", dropped, "dropped")
-    end)
+    Actions.flushSoon(self.ctx)
 end
 
 --[[--

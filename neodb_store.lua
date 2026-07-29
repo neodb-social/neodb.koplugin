@@ -43,8 +43,16 @@ local DEFAULTS = {
     portal_url             = "https://p.neodb.net",
 }
 
---- Ops we may keep queued, newest wins per dedup key.
-local MAX_QUEUE = 50
+--[[--
+Ops we may keep queued, newest wins per dedup key.
+
+The queue is one LuaSettings blob rewritten in full on every change, and a note op
+carries its whole quote, so this bounds how much gets rewritten as much as it
+bounds how much is waiting. A batch too big for it is not lost: `enqueueAll`
+refuses the tail rather than dropping the head, and whatever did not fit stays
+unrecorded for the next attempt.
+]]
+local MAX_QUEUE = 100
 
 function Store:new()
     local instance = setmetatable({}, self)
@@ -255,34 +263,91 @@ function Store:queueCount()
     return #self:getQueue()
 end
 
+--- The cap itself, so a message can name the number instead of guessing it.
+function Store:queueLimit()
+    return MAX_QUEUE
+end
+
+--- How many more ops the queue will take before it is full.
+function Store:queueRoom()
+    return math.max(0, MAX_QUEUE - #self:getQueue())
+end
+
+--[[--
+Puts `op` into the slot of the one it supersedes, if there is one.
+
+A superseding op takes over that slot rather than moving to the back. Order
+matters between ops for the same book -- progress needs the mark that precedes it
+to have been created -- and jumping the queue would break it.
+
+@treturn bool whether it replaced something
+]]
+local function supersede(queue, op)
+    if not op.dedup then return false end
+    for i = 1, #queue do
+        if queue[i].dedup == op.dedup then
+            queue[i] = op
+            return true
+        end
+    end
+    return false
+end
+
 --[[--
 Adds an op to the upload queue.
 
 `op.dedup` collapses supersedable ops: a second progress update for the same
 book replaces the first rather than piling up. Ops without a dedup key (notes,
 reviews) always append, because each one is a distinct post.
-
-A superseding op takes over the slot of the one it replaces rather than moving to
-the back. Order matters between ops for the same book -- progress needs the mark
-that precedes it to have been created -- and jumping the queue would break it.
 ]]
 function Store:enqueue(op)
     local queue = self:getQueue()
-    if op.dedup then
-        for i = 1, #queue do
-            if queue[i].dedup == op.dedup then
-                queue[i] = op
-                self.settings:flush()
-                return
-            end
+    if not supersede(queue, op) then
+        table.insert(queue, op)
+        while #queue > MAX_QUEUE do
+            logger.warn("NeoDB: upload queue full, dropping", queue[1].label)
+            table.remove(queue, 1)
         end
     end
-    table.insert(queue, op)
-    while #queue > MAX_QUEUE do
-        logger.warn("NeoDB: upload queue full, dropping", queue[1].label)
-        table.remove(queue, 1)
-    end
     self.settings:flush()
+end
+
+--[[--
+Queues a whole batch at once, and says how much of it it took.
+
+Two things this does that `enqueue` in a loop does not:
+
+* **It stops at the cap instead of dropping from the front.** Callers mark what
+  they queued as sent, so a batch that quietly lost its first half would be notes
+  recorded as sent and never posted, with nothing left to retry them. Refusing
+  the tail is recoverable instead: what was not accepted stays unmarked, and the
+  next attempt picks up exactly there.
+* **It writes the settings file once.** `enqueue` flushes per call, so a few
+  hundred of them rewrite the whole blob a few hundred times.
+
+Ops are taken in order and it stops at the first one that will not fit, so the
+result is a prefix count: the caller marks the first `n` and leaves the rest.
+
+@treturn int how many of `ops` were accepted
+]]
+function Store:enqueueAll(ops)
+    local queue = self:getQueue()
+    local accepted = 0
+    for _idx, op in ipairs(ops) do
+        if supersede(queue, op) then
+            -- Took the slot of one already waiting, so it costs no room.
+            accepted = accepted + 1
+        elseif #queue < MAX_QUEUE then
+            table.insert(queue, op)
+            accepted = accepted + 1
+        else
+            logger.warn("NeoDB: upload queue full, leaving",
+                #ops - accepted, "for the next attempt")
+            break
+        end
+    end
+    if accepted > 0 then self.settings:flush() end
+    return accepted
 end
 
 function Store:replaceQueue(queue)
