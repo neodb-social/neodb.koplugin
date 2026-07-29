@@ -451,6 +451,21 @@ function Api:notePath(uuid)
     return "/api/me/note/item/" .. uuid .. "/"
 end
 
+--[[--
+Where a post that is about nothing in particular goes.
+
+The one endpoint here that is not NeoDB's own API. A post with no catalog item
+attached is a plain fediverse status, and NeoDB has no route for one: an instance
+sends `/api/v1` straight through to the Takahe it federates with, whose
+`POST /api/v1/statuses` is Mastodon-compatible. Nothing extra is needed to reach
+it -- that side asks for `write:statuses` and accepts the bare `write` we already
+hold -- but `visibility` there is one of the strings in `Util.POST_VISIBILITIES`,
+not the integer the shelf and note endpoints take.
+]]
+function Api:statusPath()
+    return "/api/v1/statuses"
+end
+
 function Api:getProgress(uuid)
     local ok, data, code = self:call("GET", self:progressPath(uuid))
     if not ok and (code == 404 or code == 400) then return true, nil end

@@ -363,11 +363,17 @@ function Actions.pickRating(current, on_pick)
     UIManager:show(dialog)
 end
 
-function Actions.pickVisibility(current, on_pick)
+--[[--
+The "who can see this?" picker, over whichever vocabulary the endpoint uses.
+
+A mark or a note is given an integer and a post one of Mastodon's strings, but the
+question put to the reader is the same one, so only the list and its labels differ.
+]]
+local function pickVisibilityFrom(values, labeller, current, on_pick, footnote)
     local dialog
     local rows = {}
-    for _idx, visibility in ipairs(Util.VISIBILITIES) do
-        local label = Util.visibilityLabel(visibility)
+    for _idx, visibility in ipairs(values) do
+        local label = labeller(visibility)
         if current == visibility then label = "✓ " .. label end
         table.insert(rows, {{
             text = label,
@@ -382,12 +388,25 @@ function Actions.pickVisibility(current, on_pick)
         callback = function() UIManager:close(dialog) end,
     }})
 
+    local title = _("Who can see this?")
+    if footnote then title = title .. "\n" .. footnote end
+
     dialog = ButtonDialog:new{
-        title = _("Who can see this?"),
+        title = title,
         title_align = "center",
         buttons = rows,
     }
     UIManager:show(dialog)
+end
+
+function Actions.pickVisibility(current, on_pick)
+    pickVisibilityFrom(Util.VISIBILITIES, Util.visibilityLabel, current, on_pick)
+end
+
+--- Same picker, for a post. The extra line is there because "unlisted" is not obvious.
+function Actions.pickPostVisibility(current, on_pick)
+    pickVisibilityFrom(Util.POST_VISIBILITIES, Util.postVisibilityLabel, current, on_pick,
+        _("Unlisted posts are not shown in public timelines."))
 end
 
 --[[--
@@ -808,6 +827,105 @@ function Actions.addNote(ctx, opts)
         UIManager:show(dialog)
         dialog:onShowKeyboard()
     end)
+end
+
+-- Standalone posts ----------------------------------------------------------
+
+--[[--
+The post composer: a fediverse status with no book behind it.
+
+The only thing in this module that needs neither a link nor an open document, so
+it asks for nothing but a sign-in and is offered in the file browser as well. It
+goes out through the upload queue like every other write, so a thought typed with
+Wi-Fi off waits rather than being lost.
+
+Visibility starts from the reader's stored default, mapped into the vocabulary
+this endpoint uses (see `Util.postVisibilityFor`), and can be changed per post.
+]]
+function Actions.postStatus(ctx)
+    if not requireLogin(ctx) then return end
+
+    local visibility = Util.postVisibilityFor(ctx.store:get("default_visibility"))
+
+    local dialog
+    local function visibilityLabel()
+        return T(_("Visible to: %1"), Util.postVisibilityLabel(visibility))
+    end
+
+    dialog = InputDialog:new{
+        title = _("Post to NeoDB"),
+        description = T(_("As %1"), ctx.store:getAccountLabel() or "?"),
+        input_hint = _("What do you want to say?"),
+        allow_newline = true,
+        use_available_height = true,
+        -- No scroll buttons: they would be injected into our first button row,
+        -- and swiping north/south scrolls the text box anyway.
+        buttons = {
+            {
+                {
+                    text = visibilityLabel(),
+                    id = "visibility",
+                    callback = function()
+                        -- Two keyboards at once is a state KOReader does not track,
+                        -- so this one goes before the picker opens.
+                        hideKeyboard(dialog)
+                        Actions.pickPostVisibility(visibility, function(chosen)
+                            visibility = chosen
+                            relabel(dialog, "visibility", visibilityLabel())
+                        end)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function() UIManager:close(dialog) end,
+                },
+                {
+                    text = _("Post"),
+                    callback = function()
+                        local content = Util.trim(dialog:getInputText())
+                        if content == "" then
+                            Util.alert(_("The post is empty."))
+                            return
+                        end
+                        UIManager:close(dialog)
+
+                        local op = {
+                            method = "POST",
+                            path   = ctx.api:statusPath(),
+                            --[[--
+                            Only the two fields the reader actually decided. The rest
+                            of that schema defaults sensibly, and sending an empty
+                            `media_ids` would walk into the same empty-array encoding
+                            trap `markBody` avoids for `tags`.
+                            ]]
+                            body   = { status = content, visibility = visibility },
+                            -- Newlines collapsed: this label is one line in a menu.
+                            label  = T(_("Post: %1"),
+                                Util.ellipsize((content:gsub("%s+", " ")), 30)),
+                            -- No dedup: each post is its own.
+                        }
+                        local function finish(status, data, code)
+                            report(ctx, status, data, code, _("Posted to NeoDB."))
+                        end
+                        if not Util.isOnline() then
+                            return finish(ctx.api:submit(op, false))
+                        end
+                        Util.whenOnline(function()
+                            local done = Util.busy(_("Posting…"))
+                            local status, data, code = ctx.api:submit(op, true)
+                            done()
+                            finish(status, data, code)
+                        end)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 -- Upload queue --------------------------------------------------------------

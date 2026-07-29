@@ -160,6 +160,14 @@ function NeoDB:onDispatcherRegisterActions()
         title = _("NeoDB: add note"),
         reader = true,
     })
+    Dispatcher:registerAction("neodb_post_status", {
+        category = "none",
+        event = "NeoDBPostStatus",
+        title = _("NeoDB: post something"),
+        -- `general`, not `reader`, unlike the three above: a post needs no book,
+        -- so this is worth having on a file browser gesture too.
+        general = true,
+    })
 end
 
 function NeoDB:onNeoDBBookSheet()
@@ -177,6 +185,12 @@ end
 function NeoDB:onNeoDBAddNote()
     if not self:isReader() then return end
     Actions.addNote(self.ctx)
+    return true
+end
+
+--- Deliberately not gated on a document: this is the one action that needs none.
+function NeoDB:onNeoDBPostStatus()
+    Actions.postStatus(self.ctx)
     return true
 end
 
@@ -319,6 +333,18 @@ function NeoDB:buildMenu()
     table.insert(items, {
         text = _("Settings"),
         sub_item_table_func = function() return self:settingsMenu() end,
+    })
+
+    --[[--
+    Below the settings, and outside the reader-only block above: a post is the one
+    thing here that is about nothing in particular, so it needs no book and belongs
+    in the file browser too.
+    ]]
+    table.insert(items, {
+        text = _("Post something…"),
+        help_text = _("Writes a post on your NeoDB account, with no book attached to it. Queued like everything else if you are offline."),
+        keep_menu_open = false,
+        callback = function() Actions.postStatus(ctx) end,
     })
 
     return items

@@ -212,6 +212,42 @@ end
 
 Util.VISIBILITIES = { 0, 1, 2 }
 
+--[[--
+Visibility as the Mastodon-compatible API spells it, for a standalone post.
+
+NeoDB's own endpoints take the integers above; a post with no item attached goes
+through `/api/v1/statuses` instead, whose schema wants one of these four strings.
+The labels repeat the words above because they mean the same things -- NeoDB maps
+its own level 1 to a followers-only post and level 2 to a mentioned-only one,
+which is exactly what "private" and "direct" are on that side. Only "unlisted"
+is new, having no NeoDB level of its own.
+]]
+Util.POST_VISIBILITIES = { "public", "unlisted", "private", "direct" }
+
+local POST_VISIBILITY_LABELS = {
+    public   = _("Public"),
+    unlisted = _("Unlisted"),
+    private  = _("Followers only"),
+    direct   = _("Private"),
+}
+
+function Util.postVisibilityLabel(visibility)
+    return POST_VISIBILITY_LABELS[visibility] or POST_VISIBILITY_LABELS.public
+end
+
+--[[--
+The post visibility matching a stored NeoDB visibility level.
+
+So that a reader who has already said who should see their marks is not asked
+the same question again in different words. "Unlisted" is deliberately not
+reachable from here: with no level to map from it can only be chosen per post.
+]]
+function Util.postVisibilityFor(level)
+    if level == 1 then return "private" end
+    if level == 2 then return "direct" end
+    return "public"
+end
+
 --- Renders a NeoDB 1-10 rating grade as half-stars, or nil when unrated.
 function Util.stars(grade)
     if type(grade) ~= "number" or grade < 1 then return nil end

@@ -94,10 +94,30 @@ Everything is reachable from the book-actions sheet above, or from the menu:
 - **Add note** — make a note, optionally stamped with your position.
 - **Settings for this book** — what NeoDB knows about this edition, with a 
   **Show QR code** button to open the book's page on your phone.
+- **Post something…** — a post about nothing in particular. See below.
 
 To share a quote manually, select the text and choose **Share on NeoDB** from the
 selection menu. The highlight is prefilled as a block quote with the cursor
 after it, ready for your own thought, and your reading position is attached.
+
+## Posting something
+
+**NeoDB → Post something…** writes a plain post on your NeoDB account, with no
+book attached to it. It is the one entry that needs neither a link nor an open
+book, so it is there in the file browser too, and it can be bound to a gesture as
+**NeoDB: post something**.
+
+Who sees it is a button on the composer, and it opens on your **Default
+visibility** setting:
+
+| Visible to | Means |
+|---|---|
+| Public | Anyone, and listed in public timelines. |
+| Unlisted | Anyone with the link, but kept out of public timelines. |
+| Followers only | The people who follow you. |
+| Private | Only you. |
+
+Written offline, the post is queued and goes out with everything else.
 
 ## Sharing every highlight
 
