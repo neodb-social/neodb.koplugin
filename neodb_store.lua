@@ -25,7 +25,7 @@ local DEFAULTS = {
     default_visibility     = 0,       -- public
     post_to_fediverse      = false,   -- don't broadcast unless asked
     progress_unit          = "auto",  -- auto | page | percentage
-    auto_progress_on_close = false,
+    auto_progress          = false,   -- hourly and on close, when the position moved
     auto_mark_finished     = false,
     quote_as_blockquote    = true,
 
@@ -57,6 +57,14 @@ local MAX_QUEUE = 100
 function Store:new()
     local instance = setmetatable({}, self)
     instance.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/neodb.lua")
+    -- "Update progress when closing a book" grew an hourly half and a new name.
+    -- Whoever had the old switch on meant "keep NeoDB current", so it carries over.
+    local legacy = instance.settings:readSetting("auto_progress_on_close")
+    if legacy ~= nil then
+        instance.settings:saveSetting("auto_progress", legacy)
+        instance.settings:delSetting("auto_progress_on_close")
+        instance.settings:flush()
+    end
     return instance
 end
 
@@ -348,6 +356,28 @@ function Store:enqueueAll(ops)
     end
     if accepted > 0 then self.settings:flush() end
     return accepted
+end
+
+--[[--
+Takes a waiting op back out of the queue, by the same key `supersede` matches on.
+
+For the annotation that is deleted while its post is still waiting: pulling the op
+means the note never goes out at all, which beats posting it and then asking the
+server to delete it.
+
+@treturn bool whether anything was removed
+]]
+function Store:removeByDedup(dedup)
+    if not dedup then return false end
+    local queue = self:getQueue()
+    for i = 1, #queue do
+        if queue[i].dedup == dedup then
+            table.remove(queue, i)
+            self.settings:flush()
+            return true
+        end
+    end
+    return false
 end
 
 function Store:replaceQueue(queue)

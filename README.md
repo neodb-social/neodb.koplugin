@@ -131,6 +131,10 @@ Check this, each highlight or note you make in this book will be sent to NeoDB a
 - Upload is in background. An action is queued 10 seconds after you last make or update
   your annotations.
 - Highlights done in offline will be queued and go out later.
+- Deleting works in step, in books with this switch on: delete a highlight the
+  plugin has posted and the matching NeoDB note is deleted too. One deleted before
+  its post ever went out is simply never posted. Notes posted deliberately — the
+  share composer, or an export from a book whose switch is off — stay on NeoDB.
 
 Setting **Upload new highlights and notes** globally decides the setting for a
 book when it's initially linked; every book keeps its own switch afterwards.
@@ -214,7 +218,7 @@ is what sending it implies. A book already marked, including *Finished* or
 | Crosspost to connected social networks | off | Marks and notes always reach NeoDB; this also crossposts them to your connected Mastodon and/or Bluesky account. |
 | Quote highlights as block quotes | on | Prefixes shared highlights with `> `. |
 | Pairing service | `p.neodb.net` | Used by QR sign-in. Clear it to hide that option. |
-| Update progress when closing a book | off | Only for books already marked. Queued on close, uploaded later — closing a book never waits on the network. |
+| Automatically update progress | off | Every hour while reading and when the book is closed, whenever the position moved. Only for books already marked. Queued silently — reading never waits on the network. |
 | Mark as Finished at the end of a book | off | Fires when you reach the last page of a linked book. |
 | Upload new highlights and notes | off | What a book starts with when it is linked; each book keeps its own switch under **This book**. See above. |
 | Crosspost shared highlights | off | Whether shared highlights also reach your followers. Separate from the crosspost row above. |
@@ -235,11 +239,14 @@ is what sending it implies. A book already marked, including *Finished* or
 - A shared highlight is posted **once**, as it stands ten seconds after you last
   touch it. Editing it afterwards, or adding a note to one that has already gone
   out, changes nothing on NeoDB — KOReader does not even announce an edit to a
-  note's text. Deleting a highlight before its batch goes out does drop it. The id
-  NeoDB gives each note *is* recorded against the highlight that produced it,
-  which is what a later version would need to push an edit or a deletion through.
-  It reaches the book's sidecar whether that book is open, closed, or has been
-  renamed since the highlight was queued — in the last case when you next open it.
+  note's text. Deleting it does: in a book whose "Upload new highlights and notes"
+  switch is on, the NeoDB note goes too (or, if it was still waiting to upload, is
+  quietly withdrawn). The id NeoDB gives each note is recorded against the
+  highlight that produced it — that is what deletion uses, and what a later
+  version would need to push an edit through. It reaches the book's sidecar
+  whether that book is open, closed, or has been renamed since the highlight was
+  queued — in the last case when you next open it. A note posted by a version of
+  this plugin from before ids were recorded cannot be deleted from here.
 - Renaming or deleting a book does not disturb anything waiting to upload: queued
   notes are addressed to the NeoDB entry, not to the file. A book deleted along
   with its sidecar loses its link, and nothing is written back to it.

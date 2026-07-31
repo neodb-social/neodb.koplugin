@@ -72,6 +72,9 @@ a highlight again to add a second thought to it.
 ]]
 local ANNOTATION_SETTLE_SECONDS = 10
 
+--- How often "Automatically update progress" looks at where the book stands.
+local PROGRESS_TICK_SECONDS = 3600
+
 function NeoDB:init()
     self.store = Store:new()
     self.api = Api:new{ store = self.store }
@@ -119,9 +122,10 @@ function NeoDB:init()
     -- where there is no book to mark.
     if self.ui.document then
         self:addHighlightAction()
-        -- One stable closure: UIManager matches scheduled tasks by identity, so
-        -- rescheduling a new one each time would leave the old ones to fire.
+        -- One stable closure each: UIManager matches scheduled tasks by identity,
+        -- so rescheduling a new one each time would leave the old ones to fire.
         self.annotation_task = function() self:syncAnnotations() end
+        self.progress_task = function() self:progressTick() end
     end
 
     --[[--
@@ -580,10 +584,10 @@ function NeoDB:settingsMenu()
             sub_item_table = unit_items,
         },
         {
-            text = _("Update progress when closing a book"),
-            help_text = _("Only for linked books, and only if the position moved. Queued silently; nothing is uploaded until you are next online."),
-            checked_func = function() return store:get("auto_progress_on_close") end,
-            callback = function() store:toggle("auto_progress_on_close") end,
+            text = _("Automatically update progress"),
+            help_text = _("Every hour while reading, and when the book is closed -- whenever the position moved. Only for books already marked on NeoDB. Queued silently; nothing turns on Wi-Fi."),
+            checked_func = function() return store:get("auto_progress") end,
+            callback = function() store:toggle("auto_progress") end,
         },
         {
             text = _("Mark as Finished at the end of a book"),
@@ -729,31 +733,35 @@ function NeoDB:syncAnnotations()
         and UIManager:getTopmostVisibleWidget() ~= self.ui then
         return self:scheduleAnnotationSync()
     end
-    if Annotations.queueNew(self.ctx) > 0 then self:flushSoon() end
+    local queued = Annotations.queueNew(self.ctx)
+        + Annotations.queueDeletions(self.ctx)
+    if queued > 0 then self:flushSoon() end
 end
 
 --[[--
-Records progress when a linked book is closed.
+Records where a linked book stands, if it moved -- hourly and when it closes.
 
 Queued, never sent from here: a request can block the UI thread for the length
-of its timeout, and closing a book must not stall on a bad connection. It goes
-out with the next upload instead.
+of its timeout, and neither a page turn nor closing a book must stall on a bad
+connection. It goes out with the next upload instead.
+
+@treturn bool whether an update was queued
 ]]
-function NeoDB:queueClosingProgress()
-    if not self.store:get("auto_progress_on_close") then return end
-    if not self.store:isLoggedIn() then return end
+function NeoDB:queueProgressIfMoved()
+    if not self.store:get("auto_progress") then return false end
+    if not self.store:isLoggedIn() then return false end
 
     local link = self.store:getLink(self.ui.doc_settings)
-    if not link then return end
+    if not link then return false end
 
     -- Progress hangs off the mark, so there has to be one. Creating a mark as a
-    -- side effect of closing a book would be presumptuous, so skip instead.
-    if not (link.mark and link.mark.shelf_type) then return end
+    -- side effect of a timer or of closing a book would be presumptuous, so skip.
+    if not (link.mark and link.mark.shelf_type) then return false end
 
     local progress_type, value = Actions.readingPosition(self.ctx)
     local last = link.progress
     if last and last.type == progress_type and last.value == tostring(value) then
-        return -- nothing moved since last time
+        return false -- nothing moved since last time
     end
 
     self.store:enqueue({
@@ -764,7 +772,22 @@ function NeoDB:queueClosingProgress()
         dedup  = "progress:" .. link.uuid,
     })
     self.store:cacheProgress(self.ui.doc_settings, progress_type, tostring(value))
-    logger.dbg("NeoDB: queued closing progress", progress_type, value)
+    logger.dbg("NeoDB: queued progress", progress_type, value)
+    return true
+end
+
+--[[--
+The hourly half of "Automatically update progress".
+
+Reschedules itself first, so one bad tick cannot kill the clock, and stays
+scheduled while the switch is off -- the reader may flip it mid-book and expect
+it to count from then. `flushSoon` already declines to touch the radio, so a
+tick costs nothing when offline and nothing has moved.
+]]
+function NeoDB:progressTick()
+    if not self:isReader() then return end
+    UIManager:scheduleIn(PROGRESS_TICK_SECONDS, self.progress_task)
+    if self:queueProgressIfMoved() then self:flushSoon() end
 end
 
 --[[--
@@ -776,8 +799,10 @@ would otherwise come round to a document that is no longer there.
 function NeoDB:onCloseDocument()
     if not self:isReader() then return end
     UIManager:unschedule(self.annotation_task)
+    UIManager:unschedule(self.progress_task)
     Annotations.queueNew(self.ctx)
-    self:queueClosingProgress()
+    Annotations.queueDeletions(self.ctx)
+    self:queueProgressIfMoved()
 end
 
 --[[--
@@ -828,6 +853,12 @@ function NeoDB:onReaderReady()
     -- book was closed or had moved. Opening it is the next chance to put the uuid
     -- where an edit would go looking for it.
     Annotations.adoptStashed(self.ctx)
+
+    -- The hourly progress clock. Scheduled whether or not the switch is on --
+    -- the tick checks -- so flipping it mid-book needs no replumbing.
+    if self.progress_task then
+        UIManager:scheduleIn(PROGRESS_TICK_SECONDS, self.progress_task)
+    end
 
     if self.store:queueCount() == 0 then return end
     if not self.store:isLoggedIn() then return end

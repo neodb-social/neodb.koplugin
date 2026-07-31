@@ -484,6 +484,87 @@ function Annotations.queueNew(ctx)
 end
 
 --[[--
+Deletes from NeoDB what the reader has deleted from the book.
+
+Only for a book whose mirror switch is on: the switch is what "keep NeoDB in step
+with this book" means, so notes posted deliberately -- the share composer, the
+exporter on a book that never had the switch -- outlive their highlight, the same
+way they were posted without it.
+
+The ledger is the record of what went out, so a `sent` key with no matching
+annotation left in the book is a deletion. Extending a selection is not one:
+KOReader recreates the annotation with its `datetime` carried over, synchronously,
+so by the time the settle timer comes round the key is present again.
+
+What happens depends on how far the note got:
+
+* Delivered (`{ uuid, at }`): queue a DELETE against that uuid.
+* Still only queued (`true`): pull the pending post back out of the queue, so a
+  deleted highlight is never posted at all. `true` is also what a plugin version
+  that kept no uuids left behind for good -- for those the post is long gone and
+  there is no handle to delete with, so the entry is simply let go.
+
+Either way the ledger entry is dropped here, at queue time, matching how it was
+marked at queue time when the note went out.
+
+@treturn int how many server-side deletions were queued
+]]
+function Annotations.queueDeletions(ctx)
+    if not ctx.store:isLoggedIn() then return 0 end
+
+    local book = linkedBook(ctx, nil)
+    if not book or not book.state.enabled then return 0 end
+
+    local sent = sentTable(book.state)
+    if next(sent) == nil then return 0 end
+
+    --[[--
+    `annotationList` reads a missing list as an empty one, which everywhere else
+    is harmless -- nothing to post. Here it would read as "the reader deleted
+    everything" and delete a book's worth of notes off the server, so a list that
+    is not actually there must mean stop, not empty.
+    ]]
+    if not (ctx.ui and ctx.ui.annotation
+        and type(ctx.ui.annotation.annotations) == "table") then
+        return 0
+    end
+
+    local present = {}
+    for _idx, annotation in ipairs(annotationList(ctx, book)) do
+        if type(annotation) == "table" and type(annotation.datetime) == "string" then
+            present[annotation.datetime] = true
+        end
+    end
+
+    -- Clearing an existing key mid-iteration is the one mutation `next` allows.
+    local queued, changed = 0, false
+    for key, record in pairs(sent) do
+        if not present[key] then
+            if type(record) == "table" and record.uuid then
+                ctx.store:enqueue({
+                    method = "DELETE",
+                    path   = ctx.api:noteSelfPath(record.uuid),
+                    label  = T(_("Delete highlight from “%1”"), book.link.title or "?"),
+                    dedup  = "notedelete:" .. record.uuid,
+                })
+                queued = queued + 1
+            else
+                ctx.store:removeByDedup("annotation:" .. book.link.uuid .. ":" .. key)
+            end
+            sent[key] = nil
+            changed = true
+        end
+    end
+
+    if changed then
+        book.state.sent = sent
+        saveState(ctx, book)
+        logger.dbg("NeoDB: noticed deleted annotation(s),", queued, "deletion(s) queued")
+    end
+    return queued
+end
+
+--[[--
 Uploads every highlight and note in the book that NeoDB has not been told about.
 
 Unlike the automatic path this ignores when the switch was turned on, and works

@@ -451,6 +451,12 @@ function Api:notePath(uuid)
     return "/api/me/note/item/" .. uuid .. "/"
 end
 
+--- A posted note itself, for editing or deleting it. `note_uuid` is what the
+--- POST above answered with, not the item's uuid.
+function Api:noteSelfPath(note_uuid)
+    return "/api/me/note/" .. note_uuid
+end
+
 --[[--
 Where a post that is about nothing in particular goes.
 
