@@ -359,9 +359,11 @@ local function submitMark(ctx, link, body, success_text, on_done)
     }
 
     -- Offline, queue quietly rather than interrupting the reader with a Wi-Fi
-    -- prompt: they asked to change a status, not to go online.
+    -- prompt: they asked to change a status, not to go online. All three returns,
+    -- because queueing can itself fail when the queue is full, and the reason is
+    -- what makes that message say so.
     if not Util.isOnline() then
-        status = ctx.api:submit(op, false)
+        status, data, code = ctx.api:submit(op, false)
         return finish()
     end
 

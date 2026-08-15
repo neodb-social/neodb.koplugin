@@ -630,6 +630,24 @@ do
         "with no tags to resend the field is omitted, not sent as an empty object")
 end
 
+check.section("A mark that will not fit in the queue")
+do
+    reset()
+    local plugin = newPlugin()
+    linkBook(plugin, { mark_checked = "2026-08-01 00:00:00" })
+    Stubs.online = false
+
+    local filler = {}
+    for i = 1, plugin.store:queueLimit() do table.insert(filler, { label = "filler " .. i }) end
+    plugin.store:enqueueAll(filler)
+
+    Actions.setShelf(plugin.ctx, "complete")
+    check.ok((Stubs.lastAlert() or ""):find("waiting", 1, true) ~= nil,
+        "a status the queue could not take is reported as such, not as saved")
+    check.eq(plugin.store:getLink(plugin.ui.doc_settings).mark, nil,
+        "and is not cached as though it had gone")
+end
+
 check.section("A mark this device has never been told about")
 do
     --[[--
@@ -1037,9 +1055,27 @@ do
     check.eq(rows[1].text, plugin:lastFlushNote(), "the reason heads the submenu")
     check.eq(rows[1].enabled, false, "as a line to read, not a thing to tap")
 
+    --[[--
+    A connection that comes and goes is the ordinary state of an e-reader, so a
+    flush that could not reach the server is not the queue being stuck: it goes
+    out with the next one.
+    ]]
+    plugin.store:setLastFlush({ sent = 0, remaining = 1, dropped = 0, stopped = "timeout" })
+    check.eq(plugin:queueRowText(), "Uploads: 1 waiting",
+        "an unreachable server is not called paused")
+    check.ok(plugin:lastFlushNote() ~= nil,
+        "though the submenu still says the last attempt did not get through")
+
     plugin.store:setLastFlush({ sent = 2, remaining = 0, dropped = 0 })
     plugin.store:clearQueue()
     check.eq(plugin:queueRowText(), "Uploads: all sent", "a clean run reads clean again")
+
+    -- Discarding on purpose settles the matter: what the last attempt came to is
+    -- no longer a description of anything.
+    plugin.store:setLastFlush({ sent = 0, remaining = 0, dropped = 2 })
+    plugin.store:clearQueue()
+    check.eq(plugin:lastFlushNote(), nil, "discarding the queue forgets its last attempt")
+    check.eq(plugin:queueRowText(), "Uploads: all sent", "and the row stops explaining it")
 end
 
 check.section("The background flush says one thing, once")

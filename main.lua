@@ -481,10 +481,23 @@ function NeoDB:linkMenu()
 end
 
 --[[--
+Reasons the queue will not start moving again on its own.
+
+A connection that comes and goes is the ordinary state of an e-reader, so a
+flush that could not reach the server is not worth calling the queue paused over
+-- it will go out with the next one. These will not.
+]]
+local STUCK_REASONS = {
+    unauthorized = true,
+    forbidden    = true,
+    rate_limited = true,
+}
+
+--[[--
 Why the last flush did not simply work, in one line, or nil when it did.
 
-Only the two outcomes a reader can act on: uploads that stopped and are waiting
-for something, and uploads given up on for good.
+Only the outcomes a reader can act on: uploads that stopped and are waiting for
+something, and uploads given up on for good.
 ]]
 function NeoDB:lastFlushNote()
     local last = self.store:getLastFlush()
@@ -515,7 +528,10 @@ function NeoDB:queueRowText()
         end
         return _("Uploads: all sent")
     end
-    if self:lastFlushNote() then
+    -- Only when they will not move again by themselves; the submenu still carries
+    -- the detail of a flush that merely could not reach the server.
+    local last = self.store:getLastFlush()
+    if type(last) == "table" and STUCK_REASONS[last.stopped] then
         return T(_("Uploads: %1 waiting, paused"), pending)
     end
     return T(_("Uploads: %1 waiting"), pending)

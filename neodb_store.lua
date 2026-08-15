@@ -421,8 +421,16 @@ function Store:replaceQueue(queue)
     self.settings:flush()
 end
 
+--[[--
+Empties the queue, and forgets what the last attempt at it came to.
+
+The record is only there to explain what is waiting. Emptying the queue on
+purpose settles the matter, so keeping "2 could not be sent" on the menu row
+afterwards would be describing a queue that no longer exists.
+]]
 function Store:clearQueue()
     self:replaceQueue({})
+    self:set("last_flush", nil)
 end
 
 return Store
