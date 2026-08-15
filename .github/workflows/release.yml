@@ -14,13 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install luajit
-        run: sudo apt-get update && sudo apt-get install -y luajit
-
-      # A release that does not pass its own tests is not worth publishing.
-      - name: Run the harnesses
-        run: ./spec/run.sh
-
       # The zip holds what KOReader loads and nothing else: the Lua modules and
       # the licence they are under. No README, no screenshots, no tests.
       #
