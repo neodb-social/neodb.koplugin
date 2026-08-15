@@ -251,6 +251,12 @@ function Store:cacheMark(doc_settings, mark)
         comment_text = mark.comment_text,
         tags         = mark.tags,
     } or nil
+    --[[--
+    A nil mark is two different things -- "never asked" and "asked, there is
+    none" -- and only the second is safe to write over. Every caller here has an
+    answer from the server, so this is where the two are told apart.
+    ]]
+    link.mark_checked = Util.timestamp()
     self:setLink(doc_settings, link)
 end
 
@@ -307,17 +313,26 @@ Adds an op to the upload queue.
 `op.dedup` collapses supersedable ops: a second progress update for the same
 book replaces the first rather than piling up. Ops without a dedup key (notes,
 reviews) always append, because each one is a distinct post.
+
+A full queue **refuses** rather than making room. Dropping the op at the head to
+fit would throw away something already recorded as handed over -- a highlight
+marked sent in its book's ledger, which nothing ever retries -- and it would do
+it silently. A refusal is recoverable instead: the caller still holds the op, and
+can tell the reader that the queue needs uploading first.
+
+@treturn bool whether the queue took it
 ]]
 function Store:enqueue(op)
     local queue = self:getQueue()
     if not supersede(queue, op) then
-        table.insert(queue, op)
-        while #queue > MAX_QUEUE do
-            logger.warn("NeoDB: upload queue full, dropping", queue[1].label)
-            table.remove(queue, 1)
+        if #queue >= MAX_QUEUE then
+            logger.warn("NeoDB: upload queue full, refusing", op.label)
+            return false
         end
+        table.insert(queue, op)
     end
     self.settings:flush()
+    return true
 end
 
 --[[--

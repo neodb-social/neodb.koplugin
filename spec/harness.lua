@@ -214,6 +214,24 @@ do
     check.eq(store:queueCount(), store:queueLimit(), "and the queue stops at its cap")
     check.eq(store:getQueue()[1].label, "note 1",
         "the head is kept, so what was refused is the tail")
+
+    --[[--
+    A full queue must refuse the newcomer rather than make room for it. The op at
+    the head may be a highlight already recorded as sent in its book's ledger, and
+    nothing ever retries one of those -- whereas a refusal is something the caller
+    can act on and the reader can be told about.
+    ]]
+    check.eq(store:enqueue({ label = "one too many" }), false,
+        "a full queue refuses another op")
+    check.eq(store:getQueue()[1].label, "note 1", "and does not evict the one at the head")
+    check.eq(store:queueCount(), store:queueLimit(), "so the queue is unchanged")
+
+    check.eq(store:enqueue({ label = "newer note 1", dedup = "d" }), false,
+        "a full queue with nothing to supersede still refuses")
+    store:replaceQueue({ { label = "a", dedup = "d" } })
+    check.eq(store:enqueue({ label = "b", dedup = "d" }), true,
+        "but superseding one already waiting always fits")
+    check.eq(store:queueCount(), 1, "since it takes a slot rather than adding one")
 end
 
 check.section("Store: the book link")
@@ -356,6 +374,71 @@ do
     check.ok(link.annotation_sync.since ~= nil, "and is stamped for next time")
 end
 
+check.section("Sharing a highlight by hand")
+do
+    --[[--
+    The highlight menu is reachable for an annotation the book already holds,
+    through the edit dialog's "…" button, which hands the button factory the
+    annotation's index. So the composer and the mirror can be looking at the same
+    highlight, and only the ledger keeps one of them from posting it twice.
+    ]]
+    reset()
+    local plugin, ui = newPlugin{
+        annotations = { annotation{ datetime = "2026-08-01 09:00:00" } },
+    }
+    linkBook(plugin, { annotation_sync = { enabled = true, since = "2026-07-01 00:00:00" } })
+    Stubs.online = false
+
+    local factory = ui.highlight.buttons["13_neodb_quote"]
+    check.ok(factory ~= nil, "the highlight menu offers sharing")
+
+    local button = factory({
+        selected_text = { text = "The spice must flow." },
+        onClose = function() end,
+    }, 1)
+    button.callback()
+
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog.title, "Share a quote", "the composer opens with the passage")
+    dialog:press("Post")
+
+    check.eq(plugin.store:queueCount(), 1, "the note is queued")
+    local op = plugin.store:getQueue()[1]
+    check.eq(op.annotation and op.annotation.key, "2026-08-01 09:00:00",
+        "tagged with the annotation it came from, so its uuid can be filed")
+
+    check.eq(Annotations.queueNew(plugin.ctx), 0,
+        "and the mirror does not post the same highlight a second time")
+
+    -- A fresh selection is not an annotation yet, so there is nothing to record.
+    reset()
+    plugin, ui = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    -- Refetched: the factory closes over the plugin that registered it.
+    factory = ui.highlight.buttons["13_neodb_quote"]
+    button = factory({
+        selected_text = { text = "A passage nobody highlighted." },
+        onClose = function() end,
+    }, nil)
+    button.callback()
+    Stubs.lastShown("InputDialog"):press("Post")
+    check.eq(plugin.store:getQueue()[1].annotation, nil,
+        "sharing a bare selection tags nothing")
+
+    -- A refusal must not leave the highlight recorded as posted.
+    reset()
+    plugin, ui = newPlugin{ annotations = { annotation{ datetime = "2026-08-01 09:00:00" } } }
+    linkBook(plugin, { annotation_sync = { enabled = true, since = "2026-07-01 00:00:00" } })
+    recordCalls(plugin.api, function() return false, "forbidden", 403 end)
+    factory = ui.highlight.buttons["13_neodb_quote"]
+    button = factory({ selected_text = { text = "x" }, onClose = function() end }, 1)
+    button.callback()
+    Stubs.lastShown("InputDialog"):press("Post")
+    check.eq(Annotations.queueNew(plugin.ctx), 1,
+        "a note the server refused is left for the mirror to try again")
+end
+
 check.section("Annotations: uploading the backlog")
 do
     reset()
@@ -480,6 +563,24 @@ do
     })
     check.eq(Annotations.queueDeletions(plugin.ctx), 0, "with the switch off, nothing is deleted")
 
+    -- A queue with no room must leave the deletion to be noticed again.
+    reset()
+    plugin = newPlugin{ annotations = {} }
+    linkBook(plugin, {
+        annotation_sync = {
+            enabled = true,
+            since = "2026-07-01 00:00:00",
+            sent = { ["2026-08-01 09:00:00"] = { uuid = "note-5" } },
+        },
+    })
+    local filler = {}
+    for i = 1, plugin.store:queueLimit() do table.insert(filler, { label = "filler " .. i }) end
+    plugin.store:enqueueAll(filler)
+    check.eq(Annotations.queueDeletions(plugin.ctx), 0, "a full queue takes no deletion")
+    local ledger = plugin.store:getLink(plugin.ui.doc_settings).annotation_sync.sent
+    check.ok(ledger["2026-08-01 09:00:00"] ~= nil,
+        "and the ledger entry stays, so the deletion is not forgotten")
+
     -- No list at all must mean stop, not "the reader deleted everything".
     reset()
     plugin = newPlugin()
@@ -523,6 +624,63 @@ do
     body = Actions.markBody(plugin.ctx, { uuid = "x" }, { shelf_type = "wishlist" })
     check.eq(body.tags, nil,
         "with no tags to resend the field is omitted, not sent as an empty object")
+end
+
+check.section("A mark this device has never been told about")
+do
+    --[[--
+    Posting a mark replaces it, so the fields the reader did not touch are resent
+    from the cache. A link whose first fetch failed, or one made by a version that
+    did not cache, has no cache to resend from -- and would post an empty comment
+    and no rating over whatever is actually on NeoDB.
+    ]]
+    reset()
+    local plugin = newPlugin()
+    linkBook(plugin) -- linked, but nothing known about the mark
+    local calls = recordCalls(plugin.api, function(_nth, path)
+        if path:find("/progress") then return true, {}, 200 end
+        return true, {
+            shelf_type = "progress", rating_grade = 9,
+            comment_text = "Read it twice.", visibility = 0,
+        }, 200
+    end)
+
+    Actions.setShelf(plugin.ctx, "complete")
+    check.eq(calls[1].method, "GET", "the mark is read before it is written")
+    check.eq(calls[2].method, "POST", "and only then posted")
+    check.eq(calls[2].body.rating_grade, 9, "with the rating NeoDB already held")
+    check.eq(calls[2].body.comment_text, "Read it twice.", "and the comment")
+    check.eq(calls[2].body.shelf_type, "complete", "while the status is the one asked for")
+
+    -- Knowing there is no mark is knowing enough: an unmarked book must not pay
+    -- for a request on every status tap.
+    reset()
+    plugin = newPlugin()
+    linkBook(plugin)
+    calls = recordCalls(plugin.api, function() return true, nil, 404 end)
+    Actions.setShelf(plugin.ctx, "wishlist")
+    local reads = 0
+    for _idx, call in ipairs(calls) do
+        if call.method == "GET" then reads = reads + 1 end
+    end
+    check.eq(reads, 1, "the first write on an unknown mark reads it")
+
+    calls = recordCalls(plugin.api, function() return true, {}, 200 end)
+    Actions.setShelf(plugin.ctx, "complete")
+    check.eq(calls[1].method, "POST",
+        "and a second write goes straight out, knowing there was nothing to keep")
+
+    -- Offline there is no way to find out, so the reader is asked.
+    reset()
+    plugin = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    Actions.setShelf(plugin.ctx, "complete")
+    local box = Stubs.lastShown("ConfirmBox")
+    check.ok(box ~= nil, "offline, a write that could replace an unread mark asks first")
+    check.eq(plugin.store:queueCount(), 0, "and queues nothing while the question stands")
+    box:accept()
+    check.eq(plugin.store:queueCount(), 1, "answering yes queues the mark")
 end
 
 -- Automatic progress -----------------------------------------------------------------
@@ -569,6 +727,10 @@ do
     Stubs.online = false -- so the queue is not drained out from under the check
 
     plugin:onEndOfBook()
+    check.eq(plugin.store:queueCount(), 0,
+        "nothing happens inline, so KOReader's own end-of-book dialog is painted first")
+
+    UIManager:runTasks()
     local op = plugin.store:getQueue()[1]
     check.eq(op.body.shelf_type, "complete", "reaching the end marks the book Finished")
     check.eq(op.body.rating_grade, 6, "without losing the rating")
@@ -618,10 +780,82 @@ do
     store:setToken("t")
     api = Api:new{ store = store }
     store:enqueue({ method = "POST", path = "/a", label = "a" })
-    recordCalls(api, function() return false, "not_found", 404 end)
+    store:enqueue({ method = "POST", path = "/b", label = "b" })
+    local calls = recordCalls(api, function(nth)
+        if nth == 1 then return false, "not_found", 404 end
+        return true, {}, 200
+    end)
     sent, remaining, dropped = api:flushQueue()
     check.eq(dropped, 1, "an op the server will always refuse is dropped")
-    check.eq(store:queueCount(), 0, "and leaves the queue")
+    check.eq(sent, 1, "and the rest of the queue still goes out")
+    check.eq(#calls, 2, "so one dead op does not stall the ones behind it")
+end
+
+check.section("A flush that should stop rather than carry on")
+do
+    --[[--
+    Every op costs its own timeout, and every one of those blocks the UI thread.
+    A queue of a hundred against a server that stopped answering is therefore
+    minutes of frozen screen, spent proving the same thing a hundred times.
+    ]]
+    reset()
+    local store = Store:new()
+    store:setInstance(INSTANCE)
+    store:setToken("t")
+    local api = Api:new{ store = store }
+    for i = 1, 5 do
+        store:enqueue({ method = "POST", path = "/" .. i, label = "op " .. i })
+    end
+
+    local calls = recordCalls(api, function(nth)
+        if nth == 1 then return true, {}, 200 end
+        return false, "timeout"
+    end)
+    local sent, remaining, dropped, stopped = api:flushQueue()
+    check.eq(sent, 1, "what went out before the connection died is sent")
+    check.eq(#calls, 2, "and the flush stops at the first sign the network has gone")
+    check.eq(remaining, 4, "the rest are kept")
+    check.eq(dropped, 0, "and none are thrown away")
+    check.eq(stopped, "timeout", "the caller is told why it stopped")
+
+    local queue = store:getQueue()
+    check.eq(queue[1].label, "op 2", "the queue resumes exactly where it stopped")
+    check.eq(queue[4].label, "op 5", "in the order it was in")
+
+    --[[--
+    A revoked token answers 401 for every op. Dropping the queue over it would
+    throw away highlights the ledger already records as sent, and nothing ever
+    retries those.
+    ]]
+    reset()
+    store = Store:new()
+    store:setInstance(INSTANCE)
+    store:setToken("t")
+    api = Api:new{ store = store }
+    for i = 1, 3 do
+        store:enqueue({ method = "POST", path = "/" .. i, label = "op " .. i })
+    end
+    calls = recordCalls(api, function() return false, "unauthorized", 401 end)
+    sent, remaining, dropped, stopped = api:flushQueue()
+    check.eq(dropped, 0, "a refused token discards nothing")
+    check.eq(remaining, 3, "the whole queue is kept")
+    check.eq(#calls, 1, "and it is only asked once")
+    check.eq(stopped, "unauthorized", "with the reason passed back")
+
+    -- Being rate-limited is the server asking us to wait, not to give up.
+    reset()
+    store = Store:new()
+    store:setInstance(INSTANCE)
+    store:setToken("t")
+    api = Api:new{ store = store }
+    store:enqueue({ method = "POST", path = "/a", label = "a" })
+    store:enqueue({ method = "POST", path = "/b", label = "b" })
+    calls = recordCalls(api, function() return false, "rate_limited", 429 end)
+    sent, remaining, dropped, stopped = api:flushQueue()
+    check.eq(dropped, 0, "nothing is discarded for being too fast")
+    check.eq(remaining, 2, "everything waits")
+    check.eq(#calls, 1, "and we stop asking")
+    check.eq(stopped, "rate_limited", "with the reason passed back")
 end
 
 check.section("Submitting one write")
@@ -636,6 +870,18 @@ do
     local status = api:submit({ method = "POST", path = "/a", label = "a" }, false)
     check.eq(status, "queued", "a write made offline is queued, not lost")
     check.eq(store:queueCount(), 1, "and is in the queue")
+
+    -- A queue with no room says so, rather than reporting a write it did not take.
+    local batch = {}
+    for i = 1, store:queueLimit() do table.insert(batch, { label = "filler " .. i }) end
+    store:replaceQueue({})
+    store:enqueueAll(batch)
+    local kind
+    status, kind = api:submit({ method = "POST", path = "/a", label = "a" }, false)
+    check.eq(status, "failed", "a write the queue cannot take is not called queued")
+    check.eq(kind, "queue_full", "and names the reason")
+    check.ok(api:errorMessage(kind):find("waiting", 1, true) ~= nil,
+        "which turns into something the reader can act on")
 
     reset()
     store = Store:new()

@@ -210,13 +210,24 @@ highlight menu is where the reader already is when they have something to say.
 ]]
 function NeoDB:addHighlightAction()
     if not self.ui.highlight then return end
-    self.ui.highlight:addToHighlightDialog("13_neodb_quote", function(this)
+    self.ui.highlight:addToHighlightDialog("13_neodb_quote", function(this, index)
         return {
             text = _("Share on NeoDB"),
             callback = function()
                 local text = util.cleanupSelectedText(this.selected_text.text)
+                --[[--
+                An `index` means this is not a fresh selection but a highlight the
+                book already holds, reached through the edit dialog's "…" button.
+                The mirror is watching that one, so the composer has to say which
+                annotation it is posting or both of them will post it.
+                ]]
+                local shared = index and self.ui.annotation
+                    and self.ui.annotation.annotations[index] or nil
                 this:onClose()
-                Actions.addNote(self.ctx, { quote = text })
+                Actions.addNote(self.ctx, {
+                    quote = text,
+                    annotation_key = type(shared) == "table" and shared.datetime or nil,
+                })
             end,
         }
     end)
@@ -764,13 +775,16 @@ function NeoDB:queueProgressIfMoved()
         return false -- nothing moved since last time
     end
 
-    self.store:enqueue({
+    -- A queue with no room leaves the position unrecorded on purpose: caching it
+    -- would make the next tick think it had already been sent.
+    local taken = self.store:enqueue({
         method = "POST",
         path   = self.api:progressPath(link.uuid),
         body   = { type = progress_type, value = tostring(value) },
         label  = T(_("Progress for “%1”"), link.title or "?"),
         dedup  = "progress:" .. link.uuid,
     })
+    if not taken then return false end
     self.store:cacheProgress(self.ui.doc_settings, progress_type, tostring(value))
     logger.dbg("NeoDB: queued progress", progress_type, value)
     return true
@@ -820,6 +834,26 @@ function NeoDB:onEndOfBook()
     if not link then return end
     if link.mark and link.mark.shelf_type == "complete" then return end
 
+    --[[--
+    All of it on the next tick, so KOReader's own end-of-book dialog is painted
+    first: reading the mark below can take the UI thread for the length of a
+    request, and queueing writes a settings file.
+    ]]
+    UIManager:nextTick(function()
+        --[[--
+        `assume`, because there is no reader in front of this: an unknown mark is
+        read when that is possible and otherwise written over. Not marking the book
+        at all would fail the switch they turned on.
+        ]]
+        Actions.withKnownMark(self.ctx, link, function(known)
+            self:queueFinished(known)
+        end, { assume = true })
+    end)
+    -- Deliberately no `return true`: KOReader's end-of-book handling continues.
+end
+
+--- The second half of `onEndOfBook`, once the mark is as known as it can be.
+function NeoDB:queueFinished(link)
     -- Shared builder, so the no-clobber rules and the array-encoding fix live in
     -- exactly one place.
     local body = Actions.markBody(self.ctx, link, {
@@ -827,19 +861,21 @@ function NeoDB:onEndOfBook()
         post_to_fediverse = self.store:get("post_to_fediverse"),
     })
 
-    -- Queue, then upload on the next tick. Sending inline would block the UI
-    -- thread before KOReader's own end-of-book dialog even gets painted.
-    self.store:enqueue({
+    local taken = self.store:enqueue({
         method = "POST",
         path   = self.api:markPath(link.uuid),
         body   = body,
         label  = T(_("Mark “%1” as Finished"), link.title or "?"),
         dedup  = "mark:" .. link.uuid,
     })
+    if not taken then
+        -- Nothing is cached either, so reaching the end again will try afresh.
+        Util.notify(_("Could not mark as Finished: too many uploads are waiting."))
+        return
+    end
     self.store:cacheMark(self.ui.doc_settings, body)
     Util.notify(_("Marked as Finished on NeoDB."))
     self:flushSoon()
-    -- Deliberately no `return true`: KOReader's end-of-book handling continues.
 end
 
 --[[--

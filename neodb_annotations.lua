@@ -343,6 +343,49 @@ function Annotations.queueFor(ctx, book, list)
     return accepted
 end
 
+--[[--
+Records that an annotation has been handed to the queue by something else.
+
+The share composer posts a note for an annotation the mirror is also watching:
+the highlight menu is reachable for a highlight the book already holds, through
+the edit dialog's "…" button. Without a ledger entry the settle timer would find
+that highlight unsent and post it a second time.
+
+Marked at hand-off rather than on delivery, for the reason `queueFor` is: the
+timer comes round in ten seconds, and a queued post may not go out for days.
+
+@treturn bool whether this call is what made the mark, so a caller whose write
+              then failed knows it is theirs to take back
+]]
+function Annotations.markQueued(ctx, key)
+    if type(key) ~= "string" then return false end
+    local book = linkedBook(ctx, nil)
+    if not book then return false end
+
+    local sent = sentTable(book.state)
+    if sent[key] ~= nil then return false end -- already somebody's, leave it alone
+
+    sent[key] = true
+    book.state.sent = sent
+    saveState(ctx, book)
+    return true
+end
+
+--- Undoes a `markQueued` whose write turned out to be refused.
+function Annotations.unmarkQueued(ctx, key)
+    if type(key) ~= "string" then return false end
+    local book = linkedBook(ctx, nil)
+    if not book then return false end
+
+    local sent = sentTable(book.state)
+    if sent[key] == nil then return false end
+
+    sent[key] = nil
+    book.state.sent = sent
+    saveState(ctx, book)
+    return true
+end
+
 -- Filing the uuid a posted note comes back with --------------------------------
 --
 -- A note's uuid is NeoDB's only handle for editing or deleting it later, and it
@@ -541,18 +584,27 @@ function Annotations.queueDeletions(ctx)
     for key, record in pairs(sent) do
         if not present[key] then
             if type(record) == "table" and record.uuid then
-                ctx.store:enqueue({
+                --[[--
+                A queue with no room keeps the ledger entry, so this deletion is
+                noticed again next time rather than being forgotten. Same rule as
+                `queueFor`: only what the queue took is written off.
+                ]]
+                local taken = ctx.store:enqueue({
                     method = "DELETE",
                     path   = ctx.api:noteSelfPath(record.uuid),
                     label  = T(_("Delete highlight from “%1”"), book.link.title or "?"),
                     dedup  = "notedelete:" .. record.uuid,
                 })
-                queued = queued + 1
+                if taken then
+                    queued = queued + 1
+                    sent[key] = nil
+                    changed = true
+                end
             else
                 ctx.store:removeByDedup("annotation:" .. book.link.uuid .. ":" .. key)
+                sent[key] = nil
+                changed = true
             end
-            sent[key] = nil
-            changed = true
         end
     end
 

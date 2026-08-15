@@ -310,6 +310,9 @@ function Api.describeError(err, code)
     if err == "rate_limited" then return _("NeoDB is rate-limiting us. Please try again in a minute.") end
     if err == "server_error" then return _("The NeoDB server reported an error.") end
     if err == "bad_json" then return _("The NeoDB server sent something unexpected.") end
+    if err == "queue_full" then
+        return _("Too many uploads are already waiting. Upload them first, under Tools → NeoDB → Uploads.")
+    end
     if code then return string.format(_("NeoDB request failed (HTTP %d)."), code) end
     return _("NeoDB request failed.")
 end
@@ -512,7 +515,7 @@ Sends a write op, or queues it if the network is not cooperating.
 function Api:submit(op, is_online)
     if is_online == nil then is_online = Util.isOnline() end
     if not is_online then
-        self.store:enqueue(op)
+        if not self.store:enqueue(op) then return "failed", "queue_full" end
         return "queued"
     end
 
@@ -525,13 +528,36 @@ function Api:submit(op, is_online)
         return "sent", data
     end
 
-    -- Only queue things that might succeed later. A 403 will still be a 403.
-    if data == "network_error" or data == "timeout" or data == "server_error" then
-        self.store:enqueue(op)
+    -- Only queue things that might succeed later. A 404 will still be a 404, but
+    -- a rate limit is the server asking us to wait rather than to give up.
+    if data == "network_error" or data == "timeout" or data == "server_error"
+        or data == "rate_limited" then
+        if not self.store:enqueue(op) then return "failed", "queue_full" end
         return "queued", data
     end
     return "failed", data, code
 end
+
+--[[--
+Failures that are about the connection or the account rather than the op.
+
+Every op in the queue would meet the same one, so the flush stops at the first
+and keeps the rest. Two reasons, and both matter:
+
+* **Time.** Each op spends its own timeout finding out, and each of those blocks
+  the UI thread. A hundred queued notes against a server that stopped answering
+  is minutes of frozen screen.
+* **Loss.** A revoked token answers 401 for everything. Dropping the queue over
+  that would throw away highlights the per-book ledger already records as sent,
+  and nothing ever retries those.
+]]
+local STOP_FLUSH = {
+    network_error = true,
+    timeout       = true,
+    unauthorized  = true,
+    forbidden     = true,
+    rate_limited  = true,
+}
 
 --[[--
 Uploads everything that is queued.
@@ -539,32 +565,45 @@ Uploads everything that is queued.
 @treturn int number sent
 @treturn int number still queued
 @treturn int number dropped as permanently failed
+@treturn string|nil why it stopped early, when it did
 ]]
 function Api:flushQueue()
     local queue = self.store:getQueue()
     if #queue == 0 then return 0, 0, 0 end
 
     local remaining, sent, dropped = {}, 0, 0
+    local stopped
     for _idx, op in ipairs(queue) do
-        local ok, data, _code, moved_to = self:call(op.method, op.path, { json = op.body })
-        -- Follow the item to wherever it was merged, so an op queued against a uuid
-        -- that has since been merged away is delivered instead of discarded.
-        if moved_to then op.path = moved_to end
-        if ok then
-            self:announceSent(op, data)
-            sent = sent + 1
-        elseif data == "network_error" or data == "timeout" or data == "server_error" then
+        if stopped then
+            -- Kept in order, so the next attempt resumes exactly here.
             table.insert(remaining, op)
         else
-            -- Keeping these forever would block the queue behind an op that can
-            -- never succeed (deleted item, revoked token, item merged away).
-            logger.warn("NeoDB: dropping queued op", op.label, "-", tostring(data))
-            dropped = dropped + 1
+            local ok, data, _code, moved_to = self:call(op.method, op.path, { json = op.body })
+            -- Follow the item to wherever it was merged, so an op queued against a
+            -- uuid that has since been merged away is delivered instead of discarded.
+            if moved_to then op.path = moved_to end
+            if ok then
+                self:announceSent(op, data)
+                sent = sent + 1
+            elseif STOP_FLUSH[data] then
+                stopped = data
+                logger.warn("NeoDB: stopping the flush -", tostring(data))
+                table.insert(remaining, op)
+            elseif data == "server_error" then
+                -- One item the server choked on. Cheap to skip past, since it
+                -- answered rather than hung, so the rest still get their turn.
+                table.insert(remaining, op)
+            else
+                -- Keeping these forever would block the queue behind an op that can
+                -- never succeed (deleted item, item merged away, malformed body).
+                logger.warn("NeoDB: dropping queued op", op.label, "-", tostring(data))
+                dropped = dropped + 1
+            end
         end
     end
 
     self.store:replaceQueue(remaining)
-    return sent, #remaining, dropped
+    return sent, #remaining, dropped, stopped
 end
 
 return Api

@@ -28,6 +28,16 @@ local Util = require("neodb_util")
 
 local Actions = {}
 
+--[[--
+`neodb_annotations`, resolved on first use rather than required at the top.
+
+That module requires this one, so requiring it back here would be a cycle. By the
+time any of this can run, both are loaded and this is a table lookup.
+]]
+local function annotations()
+    return require("neodb_annotations")
+end
+
 -- Shared plumbing -----------------------------------------------------------
 
 --- Reports the outcome of a queued write in one consistent way.
@@ -273,6 +283,44 @@ function Actions.markBody(ctx, link, overrides)
 end
 local markBody = Actions.markBody
 
+--[[--
+Runs `on_ready(link)` with a link whose cached mark can be trusted.
+
+Every mark write resends the fields the reader did not touch, from the cache. A
+link that has never been told what NeoDB holds has nothing to resend, so it would
+post an empty comment and no rating over a rating and comment made elsewhere.
+That state is reachable: a link made while the mark fetch failed, or one made by
+a version before any of this was cached.
+
+Nothing is refetched once the answer is known, and knowing there is *no* mark
+counts -- an unmarked book has nothing to lose and must not pay for a request on
+every status tap. That is what `mark_checked` records.
+
+@param opts.assume proceed rather than ask when the answer cannot be had, for the
+                   automatic paths, which have no reader in front of them
+]]
+function Actions.withKnownMark(ctx, link, on_ready, opts)
+    if link.mark ~= nil or link.mark_checked then return on_ready(link) end
+
+    if Util.isOnline() then
+        local done = Util.busy(_("Reading your NeoDB status for this book…"))
+        local ok, mark = ctx.api:getMark(link.uuid)
+        done()
+        if ok then
+            ctx.store:cacheMark(ctx.ui.doc_settings, mark)
+            return on_ready(ctx.store:getLink(ctx.ui.doc_settings) or link)
+        end
+    end
+
+    if opts and opts.assume then return on_ready(link) end
+
+    UIManager:show(ConfirmBox:new{
+        text = _("This device has not been told what NeoDB holds for this book.\n\nSaving now would replace any rating and comment you made elsewhere."),
+        ok_text = _("Save anyway"),
+        ok_callback = function() on_ready(link) end,
+    })
+end
+
 local function submitMark(ctx, link, body, success_text, on_done)
     local status, data, code
     local finish = function()
@@ -311,12 +359,14 @@ end
 --- One-tap status change, keeping any existing rating, comment and tags.
 function Actions.setShelf(ctx, shelf, on_done)
     Actions.requireLink(ctx, function(link)
-        local body = markBody(ctx, link, {
-            shelf_type = shelf,
-            post_to_fediverse = ctx.store:get("post_to_fediverse"),
-        })
-        submitMark(ctx, link, body,
-            T(_("Marked as %1 on NeoDB."), Util.shelfLabel(shelf)), on_done)
+        Actions.withKnownMark(ctx, link, function(known)
+            local body = markBody(ctx, known, {
+                shelf_type = shelf,
+                post_to_fediverse = ctx.store:get("post_to_fediverse"),
+            })
+            submitMark(ctx, known, body,
+                T(_("Marked as %1 on NeoDB."), Util.shelfLabel(shelf)), on_done)
+        end)
     end)
 end
 
@@ -410,94 +460,107 @@ function Actions.pickPostVisibility(current, on_pick)
 end
 
 --[[--
-The rate-and-comment sheet.
+The rate-and-comment sheet itself, once there is a link and a mark to resend.
 
 Rating, visibility and the fediverse toggle live on buttons whose labels update
 in place, so the reader can see the whole state without leaving the dialog.
 ]]
-function Actions.rateAndComment(ctx, on_done)
-    Actions.requireLink(ctx, function(link)
-        local cached = link.mark or {}
-        local rating = cached.rating_grade or 0
-        local visibility = cached.visibility or ctx.store:get("default_visibility")
-        local shelf = cached.shelf_type
-        local post = ctx.store:get("post_to_fediverse")
+local function rateAndCommentDialog(ctx, link, on_done)
+    local cached = link.mark or {}
+    local rating = cached.rating_grade or 0
+    local visibility = cached.visibility or ctx.store:get("default_visibility")
+    local shelf = cached.shelf_type
+    local post = ctx.store:get("post_to_fediverse")
 
-        local dialog
-        dialog = InputDialog:new{
-            title = T(_("Rate “%1”"), Util.ellipsize(link.title or "?", 40)),
-            description = shelf
-                and T(_("Status on NeoDB: %1"), Util.shelfLabel(shelf))
-                or _("This book isn't on a NeoDB shelf yet; saving will mark it as Reading."),
-            input = cached.comment_text or "",
-            input_hint = _("Comment (optional)"),
-            allow_newline = true,
-            buttons = {
+    local dialog
+    dialog = InputDialog:new{
+        title = T(_("Rate “%1”"), Util.ellipsize(link.title or "?", 40)),
+        description = shelf
+            and T(_("Status on NeoDB: %1"), Util.shelfLabel(shelf))
+            or _("This book isn't on a NeoDB shelf yet; saving will mark it as Reading."),
+        input = cached.comment_text or "",
+        input_hint = _("Comment (optional)"),
+        allow_newline = true,
+        buttons = {
+            {
                 {
-                    {
-                        text = T(_("Rating: %1"), Util.ratingLabel(rating)),
-                        id = "rating",
-                        callback = function()
-                            hideKeyboard(dialog)
-                            Actions.pickRating(rating, function(grade)
-                                rating = grade
-                                relabel(dialog, "rating", T(_("Rating: %1"), Util.ratingLabel(grade)))
-                            end)
-                        end,
-                    },
-                },
-                {
-                    {
-                        text = T(_("Visible to: %1"), Util.visibilityLabel(visibility)),
-                        id = "visibility",
-                        callback = function()
-                            hideKeyboard(dialog)
-                            Actions.pickVisibility(visibility, function(value)
-                                visibility = value
-                                relabel(dialog, "visibility",
-                                    T(_("Visible to: %1"), Util.visibilityLabel(value)))
-                            end)
-                        end,
-                    },
-                    {
-                        text = post and _("Crosspost: on") or _("Crosspost: off"),
-                        id = "fediverse",
-                        callback = function()
-                            post = not post
-                            relabel(dialog, "fediverse",
-                                post and _("Crosspost: on") or _("Crosspost: off"))
-                        end,
-                    },
-                },
-                {
-                    {
-                        text = _("Cancel"),
-                        id = "close",
-                        callback = function() UIManager:close(dialog) end,
-                    },
-                    {
-                        text = _("Save"),
-                        callback = function()
-                            local comment = Util.trim(dialog:getInputText())
-                            UIManager:close(dialog)
-                            local body = markBody(ctx, link, {
-                                -- Rating something you never shelved implies you
-                                -- are at least reading it.
-                                shelf_type        = shelf or "progress",
-                                visibility        = visibility,
-                                comment_text      = comment,
-                                rating_grade      = rating,
-                                post_to_fediverse = post,
-                            })
-                            submitMark(ctx, link, body, _("Saved to NeoDB."), on_done)
-                        end,
-                    },
+                    text = T(_("Rating: %1"), Util.ratingLabel(rating)),
+                    id = "rating",
+                    callback = function()
+                        hideKeyboard(dialog)
+                        Actions.pickRating(rating, function(grade)
+                            rating = grade
+                            relabel(dialog, "rating", T(_("Rating: %1"), Util.ratingLabel(grade)))
+                        end)
+                    end,
                 },
             },
-        }
-        -- No keyboard up front: the reader came here to tap a rating, and the
-        -- comment is optional. Tapping the text box brings it up.
-        UIManager:show(dialog)
+            {
+                {
+                    text = T(_("Visible to: %1"), Util.visibilityLabel(visibility)),
+                    id = "visibility",
+                    callback = function()
+                        hideKeyboard(dialog)
+                        Actions.pickVisibility(visibility, function(value)
+                            visibility = value
+                            relabel(dialog, "visibility",
+                                T(_("Visible to: %1"), Util.visibilityLabel(value)))
+                        end)
+                    end,
+                },
+                {
+                    text = post and _("Crosspost: on") or _("Crosspost: off"),
+                    id = "fediverse",
+                    callback = function()
+                        post = not post
+                        relabel(dialog, "fediverse",
+                            post and _("Crosspost: on") or _("Crosspost: off"))
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function() UIManager:close(dialog) end,
+                },
+                {
+                    text = _("Save"),
+                    callback = function()
+                        local comment = Util.trim(dialog:getInputText())
+                        UIManager:close(dialog)
+                        local body = markBody(ctx, link, {
+                            -- Rating something you never shelved implies you
+                            -- are at least reading it.
+                            shelf_type        = shelf or "progress",
+                            visibility        = visibility,
+                            comment_text      = comment,
+                            rating_grade      = rating,
+                            post_to_fediverse = post,
+                        })
+                        submitMark(ctx, link, body, _("Saved to NeoDB."), on_done)
+                    end,
+                },
+            },
+        },
+    }
+    -- No keyboard up front: the reader came here to tap a rating, and the
+    -- comment is optional. Tapping the text box brings it up.
+    UIManager:show(dialog)
+end
+
+--[[--
+Rate and comment on the open book.
+
+The mark is read before the dialog opens, so the comment box is prefilled with
+what is actually on NeoDB. An empty box that then replaces a comment written
+elsewhere is the one mistake this dialog can make and not take back.
+]]
+function Actions.rateAndComment(ctx, on_done)
+    Actions.requireLink(ctx, function(link)
+        Actions.withKnownMark(ctx, link, function(known)
+            rateAndCommentDialog(ctx, known, on_done)
+        end)
     end)
 end
 
@@ -662,8 +725,13 @@ end
 --[[--
 Note composer, also used for sharing a highlighted quote.
 
-@param opts.quote  highlighted text to quote
-@param opts.title  suggested note title
+@param opts.quote          highlighted text to quote
+@param opts.title          suggested note title
+@param opts.annotation_key creation time of the annotation being shared, when the
+                           quote came from one the book already holds. It is what
+                           the highlight mirror keys its ledger on, so passing it
+                           is what stops the mirror posting the same highlight
+                           again ten seconds later.
 ]]
 function Actions.addNote(ctx, opts)
     opts = opts or {}
@@ -807,7 +875,30 @@ function Actions.addNote(ctx, opts)
                                 label  = T(_("Note on “%1”"), link.title or "?"),
                                 -- No dedup: each note is its own post.
                             }
+
+                            --[[--
+                            Sharing a highlight the book already holds: tag the op
+                            so its uuid is filed like any other, and record it as
+                            handed over *before* the write, since the mirror's
+                            timer comes round long before a queued post does.
+                            ]]
+                            local key = opts.annotation_key
+                            local marked = false
+                            if type(key) == "string" then
+                                op.annotation = {
+                                    item = link.uuid,
+                                    key  = key,
+                                    file = ctx.ui.document and ctx.ui.document.file,
+                                }
+                                marked = annotations().markQueued(ctx, key)
+                            end
+
                             local function finish(status, data, code)
+                                -- Refused for good: give the highlight back to the
+                                -- mirror rather than leaving it recorded as posted.
+                                if status == "failed" and marked then
+                                    annotations().unmarkQueued(ctx, key)
+                                end
                                 report(ctx, status, data, code, _("Note posted to NeoDB."))
                             end
                             if not Util.isOnline() then
