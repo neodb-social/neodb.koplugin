@@ -304,7 +304,9 @@ function Api.describeError(err, code)
     if err == "offline" then return _("No network connection.") end
     if err == "network_error" then return _("Could not reach the NeoDB server.") end
     if err == "timeout" then return _("The NeoDB server took too long to answer.") end
-    if err == "unauthorized" then return _("Your NeoDB login has expired. Please sign in again.") end
+    -- Not "expired": these tokens do not expire, so a refusal means it was revoked,
+    -- or that it belongs to a different server than the one configured here.
+    if err == "unauthorized" then return _("NeoDB did not accept your login. Please sign in again.") end
     if err == "forbidden" then return _("NeoDB refused this request. Your token may lack write access.") end
     if err == "not_found" then return _("Not found on NeoDB.") end
     if err == "rate_limited" then return _("NeoDB is rate-limiting us. Please try again in a minute.") end
@@ -603,6 +605,15 @@ function Api:flushQueue()
     end
 
     self.store:replaceQueue(remaining)
+    -- Recorded here rather than at the call sites, so the background path leaves
+    -- the same trace the deliberate one does.
+    self.store:setLastFlush({
+        at        = Util.timestamp(),
+        sent      = sent,
+        remaining = #remaining,
+        dropped   = dropped,
+        stopped   = stopped,
+    })
     return sent, #remaining, dropped, stopped
 end
 

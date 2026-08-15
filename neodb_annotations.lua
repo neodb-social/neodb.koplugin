@@ -634,9 +634,20 @@ function Annotations.uploadAll(ctx)
             return
         end
 
+        --[[--
+        The queue is finite and a backlog can be larger than it. What it refused is
+        deliberately left unrecorded so a second run picks it up, which is only any
+        use if the reader is told to make one.
+        ]]
         local function go()
-            Annotations.queueFor(ctx, book, list)
-            Actions.flushQueue(ctx, false)
+            local queued = Annotations.queueFor(ctx, book, list)
+            local left = #list - queued
+            Actions.flushQueue(ctx, false, function()
+                if left > 0 then
+                    Util.notify(T(_("%1 more to go — upload again once these are sent."),
+                        tostring(left)))
+                end
+            end)
         end
 
         if #list <= MANUAL_WARN_THRESHOLD then return go() end

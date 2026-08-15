@@ -322,12 +322,15 @@ function NeoDB:buildMenu()
     end
 
     table.insert(items, {
-        text_func = function()
-            local pending = self.store:queueCount()
-            if pending == 0 then return _("Uploads: all sent") end
-            return T(_("Uploads: %1 waiting"), pending)
+        text_func = function() return self:queueRowText() end,
+        --[[--
+        Also reachable with an empty queue, when the last attempt left something
+        worth reading: an upload given up on in the background is otherwise a thing
+        that happened to the reader with no way to find out about it.
+        ]]
+        enabled_func = function()
+            return self.store:queueCount() > 0 or self:lastFlushNote() ~= nil
         end,
-        enabled_func = function() return self.store:queueCount() > 0 end,
         sub_item_table_func = function() return self:queueMenu() end,
     })
 
@@ -380,8 +383,25 @@ function NeoDB:shelfMenu()
             radio = true,
             keep_menu_open = false,
             callback = function() Actions.setShelf(ctx, shelf) end,
+            separator = shelf == Util.SHELVES[#Util.SHELVES],
         })
     end
+
+    --[[--
+    The one row that is not a status.
+
+    The quick sheet is opened by holding the row above this one, and nothing said
+    so: KOReader shows `help_text` on hold only when a row has no `hold_callback`,
+    so the hint cannot go where the gesture is. A row that opens the sheet can,
+    and it is also how a reader finds the thing worth binding to a gesture.
+    ]]
+    table.insert(items, {
+        text = _("Quick actions…"),
+        help_text = _("One screen with the status, progress, rating and notes on it. Holding the row this menu came from opens it too, as does the “NeoDB: book actions” gesture."),
+        keep_menu_open = false,
+        callback = function() Actions.showSheet(ctx) end,
+    })
+
     -- Removing the mark lives under "This book", with the other undoing.
     return items
 end
@@ -460,30 +480,80 @@ function NeoDB:linkMenu()
     }
 end
 
+--[[--
+Why the last flush did not simply work, in one line, or nil when it did.
+
+Only the two outcomes a reader can act on: uploads that stopped and are waiting
+for something, and uploads given up on for good.
+]]
+function NeoDB:lastFlushNote()
+    local last = self.store:getLastFlush()
+    if type(last) ~= "table" then return nil end
+
+    if last.stopped == "unauthorized" or last.stopped == "forbidden" then
+        return _("Paused: NeoDB did not accept your login. Sign in again to send these.")
+    elseif last.stopped == "rate_limited" then
+        return _("Paused: NeoDB asked us to slow down. Try again in a minute.")
+    elseif last.stopped == "timeout" or last.stopped == "network_error" then
+        return _("Paused: the NeoDB server could not be reached.")
+    end
+
+    if (last.dropped or 0) > 0 then
+        return T(_("%1 upload(s) could not be sent and were given up on."), last.dropped)
+    end
+    return nil
+end
+
+function NeoDB:queueRowText()
+    local pending = self.store:queueCount()
+    if pending == 0 then
+        -- Something was given up on: the count is zero because they are gone, not
+        -- because they arrived, and saying "all sent" would be a lie.
+        local last = self.store:getLastFlush()
+        if type(last) == "table" and (last.dropped or 0) > 0 then
+            return T(_("Uploads: %1 could not be sent"), last.dropped)
+        end
+        return _("Uploads: all sent")
+    end
+    if self:lastFlushNote() then
+        return T(_("Uploads: %1 waiting, paused"), pending)
+    end
+    return T(_("Uploads: %1 waiting"), pending)
+end
+
 function NeoDB:queueMenu()
     local ctx = self.ctx
-    local items = {
-        {
-            text = _("Upload now"),
-            keep_menu_open = false,
-            callback = function() Actions.flushQueue(ctx, false) end,
-        },
-        {
-            text = _("Discard pending uploads…"),
-            keep_menu_open = false,
-            callback = function()
-                UIManager:show(ConfirmBox:new{
-                    text = T(_("Discard %1 pending upload(s)?"), self.store:queueCount()),
-                    ok_text = _("Discard"),
-                    ok_callback = function()
-                        self.store:clearQueue()
-                        Util.notify(_("Pending uploads discarded."))
-                    end,
-                })
-            end,
-            separator = true,
-        },
-    }
+    local items = {}
+
+    -- Why nothing is moving, first, since it is the thing that explains the rest.
+    local note = self:lastFlushNote()
+    if note then
+        table.insert(items, { text = note, enabled = false, separator = true })
+    end
+
+    table.insert(items, {
+        text = _("Upload now"),
+        enabled_func = function() return self.store:queueCount() > 0 end,
+        keep_menu_open = false,
+        callback = function() Actions.flushQueue(ctx, false) end,
+    })
+    table.insert(items, {
+        text = _("Discard pending uploads…"),
+        enabled_func = function() return self.store:queueCount() > 0 end,
+        keep_menu_open = false,
+        callback = function()
+            UIManager:show(ConfirmBox:new{
+                text = T(_("Discard %1 pending upload(s)?"), self.store:queueCount()),
+                ok_text = _("Discard"),
+                ok_callback = function()
+                    self.store:clearQueue()
+                    Util.notify(_("Pending uploads discarded."))
+                end,
+            })
+        end,
+        separator = true,
+    })
+
     -- List what is actually waiting, so "3 waiting" is not a mystery.
     for _idx, op in ipairs(self.store:getQueue()) do
         table.insert(items, {

@@ -26,6 +26,14 @@ local Login = require("neodb_login")
 local Match = require("neodb_match")
 local Util = require("neodb_util")
 
+--[[--
+The post length Takahe accepts by default (its `config.post_length`).
+
+An instance is free to raise it, so this is what a warning is measured against
+rather than a limit enforced here.
+]]
+local POST_LENGTH_LIMIT = 500
+
 local Actions = {}
 
 --[[--
@@ -164,14 +172,23 @@ a progress update never disagree about what this book's page numbers are worth.
 a book that is not open has to answer the same question from what it wrote down.
 ]]
 local function inPreferredUnit(ctx, page, percent_int, label, total, is_paging, force_unit)
+    --[[--
+    A publisher page label is reported without a total, deliberately.
+
+    The only count we have is KOReader's own, which for a file with a page map is
+    a different numbering from the labels themselves -- so "page xii of 400" puts
+    two unrelated systems either side of the word "of". Written out rather than as
+    `label and nil or total`, which in Lua evaluates to `total`.
+    ]]
     local preference = force_unit or ctx.store:get("progress_unit")
     if preference == "page" then
-        return "page", tostring(label or page or 1), total
+        if label then return "page", tostring(label), nil end
+        return "page", tostring(page or 1), total
     elseif preference == "percentage" then
         return "percentage", tostring(percent_int), total
     end
 
-    if label then return "page", tostring(label), total end
+    if label then return "page", tostring(label), nil end
     if is_paging then
         -- Fixed-layout files (PDF, DjVu, CBZ): our page numbers are the book's.
         return "page", tostring(page or 1), total
@@ -667,56 +684,65 @@ one starts selected depends on whether page numbers mean anything for this file
 ]]
 function Actions.updateProgress(ctx, on_done)
     Actions.requireLink(ctx, function(link)
-        local progress_type, value, total = Actions.readingPosition(ctx)
-
         local dialog
-        local function unitLabel()
-            return progress_type == "page" and _("Unit: page") or _("Unit: percent")
+
+        --[[--
+        Rebuilt rather than relabelled when the unit changes.
+
+        Three things depend on the unit -- the description, the value in the box
+        and whether the keyboard should be the numeric one -- and only a button
+        label can be changed in place. Relabelling left the other two saying the
+        wrong thing: "You're at 25%" over a box holding a page number, and a
+        number pad for a publisher page label like "xii". Nothing is lost by
+        rebuilding, since switching unit recomputes the value from the book
+        anyway rather than converting what was typed.
+        ]]
+        local function show(force_unit)
+            local progress_type, value, total = Actions.readingPosition(ctx, force_unit)
+            if dialog then UIManager:close(dialog) end
+
+            dialog = InputDialog:new{
+                title = _("Update reading progress"),
+                description = T(_("You're at %1."),
+                    Actions.positionLabel(progress_type, value, total)),
+                input = value,
+                input_type = tonumber(value) and "number" or nil,
+                buttons = {
+                    {
+                        {
+                            text = progress_type == "page"
+                                and _("Unit: page") or _("Unit: percent"),
+                            id = "unit",
+                            callback = function()
+                                show(progress_type == "page" and "percentage" or "page")
+                            end,
+                        },
+                    },
+                    {
+                        {
+                            text = _("Cancel"),
+                            id = "close",
+                            callback = function() UIManager:close(dialog) end,
+                        },
+                        {
+                            text = _("Send"),
+                            is_enter_default = true,
+                            callback = function()
+                                local entered = Util.trim(dialog:getInputText())
+                                if entered == "" then return end
+                                UIManager:close(dialog)
+                                Actions.sendProgressForBook(
+                                    ctx, link, progress_type, entered, false, on_done)
+                            end,
+                        },
+                    },
+                },
+            }
+            UIManager:show(dialog)
+            dialog:onShowKeyboard()
         end
 
-        dialog = InputDialog:new{
-            title = _("Update reading progress"),
-            description = T(_("You're at %1."),
-                Actions.positionLabel(progress_type, value, total)),
-            input = value,
-            input_type = tonumber(value) and "number" or nil,
-            buttons = {
-                {
-                    {
-                        text = unitLabel(),
-                        id = "unit",
-                        callback = function()
-                            -- Recompute in the other unit rather than convert
-                            -- what was typed: we know the true position in both.
-                            local wanted = progress_type == "page" and "percentage" or "page"
-                            progress_type, value = Actions.readingPosition(ctx, wanted)
-                            dialog:setInputText(value)
-                            relabel(dialog, "unit", unitLabel())
-                        end,
-                    },
-                },
-                {
-                    {
-                        text = _("Cancel"),
-                        id = "close",
-                        callback = function() UIManager:close(dialog) end,
-                    },
-                    {
-                        text = _("Send"),
-                        is_enter_default = true,
-                        callback = function()
-                            local entered = Util.trim(dialog:getInputText())
-                            if entered == "" then return end
-                            UIManager:close(dialog)
-                            Actions.sendProgressForBook(
-                                ctx, link, progress_type, entered, false, on_done)
-                        end,
-                    },
-                },
-            },
-        }
-        UIManager:show(dialog)
-        dialog:onShowKeyboard()
+        show()
     end)
 end
 
@@ -943,6 +969,37 @@ function Actions.postStatus(ctx)
         return T(_("Visible to: %1"), Util.postVisibilityLabel(visibility))
     end
 
+    --- Queues or sends what has been typed, once its length has been settled.
+    local function send(content)
+        UIManager:close(dialog)
+
+        local op = {
+            method = "POST",
+            path   = ctx.api:statusPath(),
+            --[[--
+            Only the two fields the reader actually decided. The rest of that
+            schema defaults sensibly, and sending an empty `media_ids` would walk
+            into the same empty-array encoding trap `markBody` avoids for `tags`.
+            ]]
+            body   = { status = content, visibility = visibility },
+            -- Newlines collapsed: this label is one line in a menu.
+            label  = T(_("Post: %1"), Util.ellipsize((content:gsub("%s+", " ")), 30)),
+            -- No dedup: each post is its own.
+        }
+        local function finish(status, data, code)
+            report(ctx, status, data, code, _("Posted to NeoDB."))
+        end
+        if not Util.isOnline() then
+            return finish(ctx.api:submit(op, false))
+        end
+        Util.whenOnline(function()
+            local done = Util.busy(_("Posting…"))
+            local status, data, code = ctx.api:submit(op, true)
+            done()
+            finish(status, data, code)
+        end)
+    end
+
     dialog = InputDialog:new{
         title = _("Post to NeoDB"),
         description = T(_("As %1"), ctx.store:getAccountLabel() or "?"),
@@ -981,35 +1038,26 @@ function Actions.postStatus(ctx)
                             Util.alert(_("The post is empty."))
                             return
                         end
-                        UIManager:close(dialog)
 
-                        local op = {
-                            method = "POST",
-                            path   = ctx.api:statusPath(),
-                            --[[--
-                            Only the two fields the reader actually decided. The rest
-                            of that schema defaults sensibly, and sending an empty
-                            `media_ids` would walk into the same empty-array encoding
-                            trap `markBody` avoids for `tags`.
-                            ]]
-                            body   = { status = content, visibility = visibility },
-                            -- Newlines collapsed: this label is one line in a menu.
-                            label  = T(_("Post: %1"),
-                                Util.ellipsize((content:gsub("%s+", " ")), 30)),
-                            -- No dedup: each post is its own.
-                        }
-                        local function finish(status, data, code)
-                            report(ctx, status, data, code, _("Posted to NeoDB."))
+                        --[[--
+                        Over the server's limit this comes back as a refusal -- and
+                        a post written offline would collect that refusal days
+                        later, out of sight, and be given up on. So the length is
+                        checked here, but only warned about: the limit belongs to
+                        the server, and a self-hosted one may well allow more.
+                        ]]
+                        local length = Util.charCount(content)
+                        if length > POST_LENGTH_LIMIT then
+                            hideKeyboard(dialog)
+                            UIManager:show(ConfirmBox:new{
+                                text = T(_("This post is %1 characters long. Most NeoDB servers accept %2.\n\nPost it anyway?"),
+                                    tostring(length), tostring(POST_LENGTH_LIMIT)),
+                                ok_text = _("Post anyway"),
+                                ok_callback = function() send(content) end,
+                            })
+                            return
                         end
-                        if not Util.isOnline() then
-                            return finish(ctx.api:submit(op, false))
-                        end
-                        Util.whenOnline(function()
-                            local done = Util.busy(_("Posting…"))
-                            local status, data, code = ctx.api:submit(op, true)
-                            done()
-                            finish(status, data, code)
-                        end)
+                        send(content)
                     end,
                 },
             },
@@ -1032,9 +1080,22 @@ blocks the UI thread for as long as its timeout.
 function Actions.flushSoon(ctx)
     if not Util.isOnline() then return end
     UIManager:nextTick(function()
-        local sent, remaining, dropped = ctx.api:flushQueue()
+        -- Read before the flush overwrites it: what we have already said about.
+        local previous = ctx.store:getLastFlush()
+        local sent, remaining, dropped, stopped = ctx.api:flushQueue()
         logger.dbg("NeoDB: flushed queue,", sent, "sent,", remaining, "left,",
             dropped, "dropped")
+
+        --[[--
+        Silent by design, with one exception: uploads that have stopped because of
+        the account are not going to start again by themselves, and this path runs
+        every time a book is opened. Said once per change of circumstance, so it is
+        a notice rather than a nag; the Uploads row carries it from then on.
+        ]]
+        if (stopped == "unauthorized" or stopped == "forbidden")
+            and stopped ~= (type(previous) == "table" and previous.stopped or nil) then
+            Util.notify(_("NeoDB uploads are paused: sign in again to send them."))
+        end
     end)
 end
 

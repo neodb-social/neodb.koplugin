@@ -88,7 +88,8 @@ Everything is reachable from the book-actions sheet above, or from the menu:
 
 - **The top row** names where the book stands, and opens the shelf list that
   changes it: Want to read / Reading / Finished / Dropped. Long-press it for the
-  book-actions sheet.
+  book-actions sheet, which is also the **Quick actions…** row at the foot of
+  that shelf list.
 - **Update progress** — updates reading progress manually. See below.
 - **Rate and comment** — rating from ½ to 5 starts, plus an optional comment.
 - **Add note** — make a note, optionally stamped with your position.
@@ -205,8 +206,16 @@ is what sending it implies. A book already marked, including *Finished* or
   is waiting.
 - Repeated progress updates for the same book collapse to the newest one; notes
   are each kept separately.
-- An update that can never succeed (deleted item, revoked token) is discarded
-  rather than blocking the queue.
+- An update that can never succeed — a deleted item, a body the server rejects —
+  is discarded rather than blocking the queue behind it.
+- Uploading **stops** rather than discards when the problem is the connection or
+  the account: a refused login, a rate limit, a server that stopped answering.
+  Everything waits, in order, and the **Uploads** row says why it is paused. A
+  refused login is also announced once, since it will not fix itself.
+- The queue holds 100 uploads. Once it is full it **refuses** new ones instead of
+  dropping the oldest, and whatever was refused is left unrecorded so the next
+  attempt picks it up. Uploading a backlog of highlights larger than that is
+  therefore done in runs, and you are told how many are still to go.
 - The automatic syncs never switch Wi-Fi on by themselves.
 
 ## Settings

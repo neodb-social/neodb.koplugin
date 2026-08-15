@@ -87,6 +87,11 @@ function Util.timestamp()
     return os.date("%Y-%m-%d %H:%M:%S")
 end
 
+--- Characters, not bytes: what a server counting a post length counts.
+function Util.charCount(text)
+    return #util.splitToChars(text or "")
+end
+
 --- Truncates on character (not byte) boundaries, so we never split a UTF-8 sequence.
 function Util.ellipsize(text, max_chars)
     text = Util.trim(text or "")

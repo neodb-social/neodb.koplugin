@@ -279,9 +279,13 @@ do
 
     reset()
     plugin = newPlugin{ page = 100, pages = 400, percent = 0.25, labels = "xii" }
-    kind, value = Actions.readingPosition(plugin.ctx)
+    local label_total
+    kind, value, label_total = Actions.readingPosition(plugin.ctx)
     check.eq(kind, "page", "publisher page numbers win over a percentage")
     check.eq(value, "xii", "and are sent as printed")
+    check.eq(label_total, nil,
+        "with no total, since the only count we have is KOReader's own and "
+        .. "“page xii of 400” puts two different numberings either side of “of”")
 
     check.eq(Actions.positionLabel("percentage", "25"), "25%", "a percentage reads as one")
     check.eq(Actions.positionLabel("page", "100", 400), "page 100 of 400",
@@ -977,6 +981,15 @@ do
     check.eq(labelOf(rows[9]), "Settings", "then the global ones")
     check.eq(labelOf(rows[10]), "Post something…", "and a post needs no book, so it comes last")
 
+    -- The quick sheet is opened by holding the status row, and KOReader shows a
+    -- row's help_text on hold only when it has no hold_callback -- so the hint
+    -- cannot live on the gesture, and there is a row for it instead.
+    local shelves = plugin:shelfMenu()
+    check.eq(shelves[#shelves].text, "Quick actions…",
+        "the shelf list ends with a tappable way to the sheet")
+    check.ok(shelves[#shelves].help_text:find("gesture", 1, true) ~= nil,
+        "which is where the long press and the gesture are named")
+
     check.eq(rows[5].enabled_func(), false,
         "uploading a backlog is offered only once the book is linked")
     linkBook(plugin)
@@ -996,6 +1009,131 @@ do
     check.eq(#rows, 4, "the file browser gets four rows")
     check.eq(labelOf(rows[1]), "Uploads: all sent", "the queue")
     check.eq(labelOf(rows[4]), "Post something…", "and a post, which needs no book")
+end
+
+check.section("The queue row says what happened to it")
+do
+    reset()
+    local plugin = newPlugin()
+    check.eq(plugin:queueRowText(), "Uploads: all sent", "an empty queue that emptied itself")
+    check.eq(plugin:lastFlushNote(), nil, "has nothing to explain")
+
+    -- Uploads given up on in the background are otherwise invisible: the count
+    -- goes to zero because they are gone, not because they arrived.
+    plugin.store:setLastFlush({ sent = 0, remaining = 0, dropped = 2 })
+    check.eq(plugin:queueRowText(), "Uploads: 2 could not be sent",
+        "so a queue emptied by failure does not read as success")
+    check.ok(plugin:lastFlushNote() ~= nil, "and the row can be opened to find out why")
+
+    -- Stopped because of the account: it will not start again by itself.
+    plugin.store:setLastFlush({ sent = 0, remaining = 3, dropped = 0, stopped = "unauthorized" })
+    plugin.store:enqueue({ label = "a" })
+    check.eq(plugin:queueRowText(), "Uploads: 1 waiting, paused",
+        "a paused queue says so rather than looking like it is working")
+    check.ok(plugin:lastFlushNote():find("Sign in", 1, true) ~= nil,
+        "and names what to do about it")
+
+    local rows = plugin:queueMenu()
+    check.eq(rows[1].text, plugin:lastFlushNote(), "the reason heads the submenu")
+    check.eq(rows[1].enabled, false, "as a line to read, not a thing to tap")
+
+    plugin.store:setLastFlush({ sent = 2, remaining = 0, dropped = 0 })
+    plugin.store:clearQueue()
+    check.eq(plugin:queueRowText(), "Uploads: all sent", "a clean run reads clean again")
+end
+
+check.section("The background flush says one thing, once")
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    recordCalls(plugin.api, function() return false, "unauthorized", 401 end)
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(Stubs.lastNotification(),
+        "NeoDB uploads are paused: sign in again to send them.",
+        "uploads stopped by the account are worth interrupting for once")
+
+    Stubs.notifications = {}
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(Stubs.lastNotification(), nil,
+        "but not every time a book is opened, which is when this path runs")
+end
+
+check.section("A post longer than the server takes")
+do
+    reset()
+    local plugin = newPlugin()
+    Stubs.online = false
+    Actions.postStatus(plugin.ctx)
+    local dialog = Stubs.lastShown("InputDialog")
+
+    dialog:typeText(string.rep("x", 501))
+    dialog:press("Post")
+    check.eq(plugin.store:queueCount(), 0,
+        "an over-long post is not queued to fail out of sight days later")
+    local box = Stubs.lastShown("ConfirmBox")
+    check.ok(box ~= nil, "the reader is warned")
+    check.ok(box.text:find("501", 1, true) ~= nil, "with the length it actually is")
+
+    -- The limit belongs to the server, so this warns rather than refuses.
+    box:accept()
+    check.eq(plugin.store:queueCount(), 1, "and can still post it anyway")
+
+    reset()
+    plugin = newPlugin()
+    Stubs.online = false
+    Actions.postStatus(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText(string.rep("x", 500))
+    dialog:press("Post")
+    check.eq(plugin.store:queueCount(), 1, "a post inside the limit is not questioned")
+end
+
+check.section("The progress dialog after switching unit")
+do
+    reset()
+    local plugin = newPlugin{ page = 100, pages = 400, percent = 0.25, labels = "xii" }
+    linkBook(plugin)
+    Actions.updateProgress(plugin.ctx)
+
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog.description, "You're at page xii.", "it opens at the reader's position")
+    check.eq(dialog:label("unit"), "Unit: page", "in this book's own unit")
+    check.eq(dialog.input_type, nil,
+        "with no number pad, since a publisher page label is not a number")
+
+    dialog:press("unit")
+    local switched = Stubs.lastShown("InputDialog")
+    check.ok(switched ~= dialog, "switching unit rebuilds the dialog")
+    check.eq(dialog.closed, true, "and closes the one it replaces")
+    check.eq(switched.description, "You're at 25%.",
+        "so the description cannot be left describing the other unit")
+    check.eq(switched:label("unit"), "Unit: percent", "the button agrees")
+    check.eq(switched.typed, "25", "and so does the box")
+    check.eq(switched.input_type, "number", "which now wants a number pad")
+end
+
+check.section("Uploading a backlog bigger than the queue")
+do
+    reset()
+    local annotations = {}
+    for i = 1, 120 do
+        table.insert(annotations, annotation{
+            datetime = string.format("2026-08-01 %02d:%02d:00", math.floor(i / 60), i % 60),
+        })
+    end
+    local plugin = newPlugin{ annotations = annotations }
+    linkBook(plugin)
+    recordCalls(plugin.api, function() return true, {}, 200 end)
+
+    Annotations.uploadAll(plugin.ctx)
+    Stubs.lastShown("ConfirmBox"):accept()
+    check.eq(Stubs.lastNotification(),
+        "20 more to go — upload again once these are sent.",
+        "what the queue could not take is reported, since a second run is needed")
 end
 
 check.section("Gesture actions")

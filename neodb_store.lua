@@ -395,6 +395,27 @@ function Store:removeByDedup(dedup)
     return false
 end
 
+--[[--
+What the last upload attempt came to.
+
+The queue is drained in the background, where nothing is on screen to report to,
+so without this a flush that stopped or discarded something leaves no trace the
+reader could ever find. The menu row reads it.
+
+    at         when it ran
+    sent       how many went out
+    remaining  how many are still waiting
+    dropped    how many were given up on for good
+    stopped    why it stopped early, if it did
+]]
+function Store:setLastFlush(record)
+    self:set("last_flush", record)
+end
+
+function Store:getLastFlush()
+    return self:get("last_flush")
+end
+
 function Store:replaceQueue(queue)
     self.settings:saveSetting("queue", queue)
     self.settings:flush()
