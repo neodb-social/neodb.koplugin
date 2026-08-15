@@ -199,6 +199,34 @@ local function inPreferredUnit(ctx, page, percent_int, label, total, is_paging, 
 end
 
 --[[--
+How far through the book the reader is, as a 0..1 fraction.
+
+`percent_finished` in the sidecar is written by `onSaveSettings` and nowhere else
+(`readerrolling.lua:338`, `readerpaging.lua:163`), so while a book is open it is
+as old as the last autosave: fifteen minutes by default, and never refreshed at
+all for a reader who has set saving to "only on close and suspend". Reporting
+from it meant the hourly progress update kept deciding nothing had moved.
+
+The footer keeps a live one, recomputed on every page and position change and by
+the same arithmetic KOReader shows the reader (`pageno / pages`, flow-relative
+where the file has hidden flows). It is a widget that exists whether or not it is
+drawn. The sidecar is the fallback for a book that is not open, and the page
+count for one that has no stored percentage yet.
+]]
+local function currentPercent(ui, page, total)
+    local footer = ui.view and ui.view.footer
+    if footer and type(footer.percent_finished) == "number" then
+        return footer.percent_finished
+    end
+
+    local stored = ui.doc_settings and ui.doc_settings:readSetting("percent_finished")
+    if type(stored) == "number" then return stored end
+
+    if page and total and total > 0 then return page / total end
+    return nil
+end
+
+--[[--
 Works out what to report as the reader's position.
 
 @param force_unit optional "page"/"percentage", overriding the preference
@@ -211,10 +239,7 @@ function Actions.readingPosition(ctx, force_unit)
     local page = ui.getCurrentPage and ui:getCurrentPage() or nil
     local total = pageCount(ui)
 
-    local percent = ui.doc_settings and ui.doc_settings:readSetting("percent_finished")
-    if not percent and page and total and total > 0 then
-        percent = page / total
-    end
+    local percent = currentPercent(ui, page, total)
     local label = hasPageLabels(ui) and ui.pagemap:getCurrentPageLabel(true) or nil
 
     return inPreferredUnit(ctx, page, wholePercent(percent), label, total,

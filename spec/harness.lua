@@ -73,6 +73,12 @@ local function newReaderUI(opts)
     }
     function ui:getCurrentPage() return opts.page or 100 end
 
+    -- The footer's own live percentage, which is what KOReader shows and what
+    -- the sidecar only catches up with when it is saved.
+    if opts.footer_percent then
+        ui.view = { footer = { percent_finished = opts.footer_percent } }
+    end
+
     if opts.labels then
         ui.pagemap = {
             wantsPageLabels = function() return true end,
@@ -292,6 +298,47 @@ do
         "a page says what it is out of")
     check.eq(Actions.positionLabel("page", "xii"), "page xii",
         "and drops the total when there is none")
+end
+
+check.section("Progress while the book is still open")
+do
+    --[[--
+    KOReader writes percent_finished to the sidecar only when it saves settings,
+    so during a session that number is as old as the last autosave, and never
+    changes at all for a reader who saves only on close. Reporting from it made
+    the hourly update decide, all session, that nothing had moved.
+    ]]
+    reset()
+    local plugin = newPlugin{ page = 100, pages = 400, percent = 0.10, footer_percent = 0.25 }
+    local _kind, value = Actions.readingPosition(plugin.ctx)
+    check.eq(value, "25", "the live position wins over the one last written to disk")
+
+    reset()
+    plugin = newPlugin{ page = 100, pages = 400, percent = 0.10 }
+    _kind, value = Actions.readingPosition(plugin.ctx)
+    check.eq(value, "10", "with no live one, the sidecar answers")
+
+    reset()
+    plugin = newPlugin{ page = 100, pages = 400 }
+    _kind, value = Actions.readingPosition(plugin.ctx)
+    check.eq(value, "25", "and failing that, the page count does")
+
+    -- Which is the whole point of the hourly update.
+    reset()
+    plugin = newPlugin{ page = 100, pages = 400, percent = 0.10, footer_percent = 0.10 }
+    linkBook(plugin)
+    plugin.store:set("auto_progress", true)
+    plugin.store:cacheMark(plugin.ui.doc_settings, { shelf_type = "progress" })
+    Stubs.online = false
+
+    check.eq(plugin:queueProgressIfMoved(), true, "the first tick reports where the reader is")
+    plugin.store:clearQueue()
+    check.eq(plugin:queueProgressIfMoved(), false, "a tick after no reading reports nothing")
+
+    plugin.ui.view.footer.percent_finished = 0.20
+    check.eq(plugin:queueProgressIfMoved(), true,
+        "but reading on is noticed, though the sidecar has not been written since")
+    check.eq(plugin.store:getQueue()[1].body.value, "20", "at the position now reached")
 end
 
 check.section("Where an annotation sits")

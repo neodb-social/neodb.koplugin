@@ -78,7 +78,7 @@ puts us at the end as before. The tables are module-level and `require` caches
 them, so this outlives every menu rebuild but happens only once.
 ]]
 local MENU_ID = "neodb"
-local MENU_POSITION = 4
+local MENU_POSITION = 3
 
 local function claimMenuPosition(order_module)
     local ok, order = pcall(require, order_module)
