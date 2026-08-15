@@ -19,6 +19,17 @@ support both.
 
 ## Install
 
+### From a plugin store
+
+If you use one of the community plugin managers, it is the easiest route, and it
+handles updates afterwards. Both list this plugin: search for **NeoDB** and
+install it.
+
+- [Storefront](https://github.com/ultimatejimmy/storefront.koplugin)
+- [AppStore](https://github.com/omer-faruq/appstore.koplugin)
+
+### By hand
+
 Download `neodb.koplugin.zip` from
 [the latest release](https://github.com/neodb-social/neodb.koplugin/releases/latest)
 and unzip it into KOReader's `plugins` directory. It already holds a correctly
@@ -91,7 +102,8 @@ Everything is reachable from the book-actions sheet above, or from the menu:
 - **The top row** names where the book stands, and opens the shelf list that
   changes it: Want to read / Reading / Finished / Dropped. Long-press it for the
   book-actions sheet, which is also the **Quick actions…** row at the foot of
-  that shelf list.
+  that shelf list. Before you have signed in or linked the book, that row offers
+  the step you are missing instead of the shelves.
 - **Update progress** — updates reading progress manually. See below.
 - **Rate and comment** — rating from ½ to 5 starts, plus an optional comment.
 - **Add note** — make a note, optionally stamped with your position.

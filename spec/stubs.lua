@@ -615,6 +615,34 @@ modules["dispatcher"] = {
     end,
 }
 
+--[[--
+KOReader's own menu order, which is what decides where a row sits in a tab.
+
+Copied from `frontend/ui/elements/*_menu_order.lua` as far as the Tools tab goes,
+because the plugin inserts itself into these and a test has to be able to see
+where it landed.
+]]
+local function toolsOrder(extra)
+    local tools = {
+        "read_timer",
+        "calibre",
+        "exporter",
+        "statistics",
+    }
+    for _idx, id in ipairs(extra or {}) do table.insert(tools, id) end
+    for _idx, id in ipairs({ "cloudstorage", "text_editor", "profiles",
+                             "----------------------------", "more_tools" }) do
+        table.insert(tools, id)
+    end
+    return {
+        ["KOMenu:menu_buttons"] = { "navi", "typeset", "setting", "tools", "search", "main" },
+        tools = tools,
+    }
+end
+
+modules["ui/elements/reader_menu_order"] = toolsOrder({ "progress_sync" })
+modules["ui/elements/filemanager_menu_order"] = toolsOrder()
+
 modules["provider"] = {
     register = function(_self, feature, name, implementation)
         Stubs.providers[feature] = Stubs.providers[feature] or {}

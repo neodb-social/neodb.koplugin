@@ -64,6 +64,37 @@ if provider_ok and type(Provider) == "table" and Provider.register then
 end
 
 --[[--
+Claims a place in the Tools menu instead of being appended to the end of it.
+
+`sorting_hint` picks the tab, not the position: `MenuSorter` attaches anything
+KOReader's own menu order does not name to the *end* of that tab, behind every
+built-in. Naming ourselves in that order is the only way to sit among them.
+
+It is safe in both directions. An id in the order with no menu item behind it is
+skipped and the gap compressed away, so nothing is left behind; a disabled plugin
+never runs this file at all; and a reader with their own `reader_menu_order.lua`
+replaces the whole list, in which case we are simply not in it and `sorting_hint`
+puts us at the end as before. The tables are module-level and `require` caches
+them, so this outlives every menu rebuild but happens only once.
+]]
+local MENU_ID = "neodb"
+local MENU_POSITION = 4
+
+local function claimMenuPosition(order_module)
+    local ok, order = pcall(require, order_module)
+    if not ok or type(order) ~= "table" or type(order.tools) ~= "table" then return end
+
+    local tools = order.tools
+    for _idx, id in ipairs(tools) do
+        if id == MENU_ID then return end -- already ours
+    end
+    table.insert(tools, math.min(MENU_POSITION, #tools + 1), MENU_ID)
+end
+
+claimMenuPosition("ui/elements/reader_menu_order")
+claimMenuPosition("ui/elements/filemanager_menu_order")
+
+--[[--
 How long the reader has to leave their annotations alone before we act on them.
 
 Only counts while nothing is on screen, so writing a note takes as long as it
@@ -370,8 +401,69 @@ function NeoDB:buildMenu()
     return items
 end
 
+--[[--
+The three ways to attach this book to a NeoDB entry.
+
+Shared by "Settings for this book" and by the status row's own submenu, which
+offers them in place of a shelf list when there is nothing to shelve yet.
+]]
+function NeoDB:findBookRows()
+    local ctx = self.ctx
+    return {
+        {
+            text = _("Find this book on NeoDB…"),
+            keep_menu_open = false,
+            callback = function() Match.autoMatch(ctx) end,
+        },
+        {
+            text = _("Find by title or author…"),
+            keep_menu_open = false,
+            callback = function()
+                local meta = Match.getBookMeta(self.ui)
+                Match.searchPrompt(ctx, meta.query)
+            end,
+        },
+        {
+            text = _("Link by URL…"),
+            keep_menu_open = false,
+            callback = function() Match.promptUrl(ctx) end,
+        },
+    }
+end
+
+--[[--
+The submenu under the status row.
+
+That row states where the book stands, so its submenu has to offer whatever would
+change that -- and when the answer is "sign in" or "link this book", a list of
+shelves is not it. Tapping one used to walk the reader into a question they had
+not asked, about a step they had not been told was missing. So the missing step is
+named instead, and the shelves appear once there is something to put on one.
+]]
 function NeoDB:shelfMenu()
     local ctx = self.ctx
+
+    if not self.store:isLoggedIn() then
+        return {
+            {
+                text = _("Sign in to NeoDB…"),
+                help_text = _("Everything else here needs an account to talk to."),
+                keep_menu_open = false,
+                callback = function() Login.show(ctx) end,
+            },
+        }
+    end
+
+    local link, foreign = self.store:getLink(self.ui.doc_settings)
+    if not link then
+        local items = self:findBookRows()
+        if foreign then
+            -- The book carries a link, but to a server this account cannot use.
+            items[1].help_text = _("This book is linked to a different NeoDB server. Finding it again links it to the one you are signed in to.")
+        end
+        return items
+    end
+
     local items = {}
     for _idx, shelf in ipairs(Util.SHELVES) do
         table.insert(items, {
@@ -408,7 +500,7 @@ end
 
 function NeoDB:linkMenu()
     local ctx = self.ctx
-    return {
+    local items = {
         {
             text = _("Show linked book"),
             enabled_func = function()
@@ -458,26 +550,12 @@ function NeoDB:linkMenu()
             keep_menu_open = false,
             callback = function() Match.unlink(ctx) end,
         },
-        {
-            text = _("Find this book on NeoDB…"),
-            keep_menu_open = false,
-            callback = function() Match.autoMatch(ctx) end,
-        },
-        {
-            text = _("Find by title or author…"),
-            keep_menu_open = false,
-            callback = function()
-                local meta = Match.getBookMeta(self.ui)
-                Match.searchPrompt(ctx, meta.query)
-            end,
-        },
-        {
-            text = _("Link by URL…"),
-            keep_menu_open = false,
-            callback = function() Match.promptUrl(ctx) end,
-            separator = true,
-        },
     }
+
+    -- The same three the status row offers when there is nothing linked yet.
+    for _idx, row in ipairs(self:findBookRows()) do table.insert(items, row) end
+    items[#items].separator = true
+    return items
 end
 
 --[[--

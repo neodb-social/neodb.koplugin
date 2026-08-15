@@ -999,15 +999,6 @@ do
     check.eq(labelOf(rows[9]), "Settings", "then the global ones")
     check.eq(labelOf(rows[10]), "Post something…", "and a post needs no book, so it comes last")
 
-    -- The quick sheet is opened by holding the status row, and KOReader shows a
-    -- row's help_text on hold only when it has no hold_callback -- so the hint
-    -- cannot live on the gesture, and there is a row for it instead.
-    local shelves = plugin:shelfMenu()
-    check.eq(shelves[#shelves].text, "Quick actions…",
-        "the shelf list ends with a tappable way to the sheet")
-    check.ok(shelves[#shelves].help_text:find("gesture", 1, true) ~= nil,
-        "which is where the long press and the gesture are named")
-
     check.eq(rows[5].enabled_func(), false,
         "uploading a backlog is offered only once the book is linked")
     linkBook(plugin)
@@ -1172,6 +1163,61 @@ do
         "what the queue could not take is reported, since a second run is needed")
 end
 
+check.section("The status row offers whatever is actually in the way")
+do
+    --[[--
+    The row states where the book stands, so its submenu has to offer the thing
+    that would change that. Shelves under a book that is not linked, or under no
+    account at all, only lead to a question the reader never asked.
+    ]]
+    reset()
+    local plugin = newPlugin{ signed_out = true }
+    local rows = plugin:shelfMenu()
+    check.eq(#rows, 1, "signed out, there is one thing to do")
+    check.eq(rows[1].text, "Sign in to NeoDB…", "and it says so plainly")
+
+    -- Signed in, but this book is not linked to anything yet.
+    reset()
+    plugin = newPlugin()
+    rows = plugin:shelfMenu()
+    check.eq(rows[1].text, "Find this book on NeoDB…", "unlinked, the ways to link it")
+    check.eq(rows[2].text, "Find by title or author…", "including searching by hand")
+    check.eq(rows[3].text, "Link by URL…", "and pasting a link")
+    check.eq(#rows, 3, "and no shelves, since there is nothing to put on one")
+
+    -- A link belonging to another server is not one this account can use.
+    reset()
+    plugin = newPlugin()
+    plugin.store:setLink(plugin.ui.doc_settings,
+        { uuid = "item-9", title = "Dune", instance = "https://other.example" })
+    rows = plugin:shelfMenu()
+    check.eq(rows[1].text, "Find this book on NeoDB…", "a foreign link offers the same")
+    check.ok(rows[1].help_text ~= nil, "and explains why it is not simply linked")
+
+    -- Linked: now the shelves mean something.
+    reset()
+    plugin = newPlugin()
+    linkBook(plugin)
+    rows = plugin:shelfMenu()
+    check.eq(rows[1].text, "Want to read", "linked, the shelves are the answer")
+    check.eq(rows[4].text, "Dropped", "all four of them")
+    -- The quick sheet is opened by holding the status row, and KOReader shows a
+    -- row's help_text on hold only when it has no hold_callback -- so the hint
+    -- cannot live on the gesture, and there is a row for it instead.
+    check.eq(rows[5].text, "Quick actions…", "then a tappable way to the sheet")
+    check.ok(rows[5].help_text:find("gesture", 1, true) ~= nil,
+        "which is where the long press and the gesture are named")
+
+    -- The same three rows are shared with "Settings for this book", where they
+    -- come after everything about the link that already exists.
+    local book_rows = plugin:linkMenu()
+    check.eq(book_rows[1].text, "Show linked book", "which still leads with the link itself")
+    check.eq(book_rows[#book_rows - 2].text, "Find this book on NeoDB…",
+        "and ends with the same three ways to link")
+    check.eq(book_rows[#book_rows].text, "Link by URL…", "in the same order")
+    check.eq(book_rows[#book_rows].separator, true, "keeping the separator under them")
+end
+
 check.section("Gesture actions")
 do
     check.ok(Stubs.dispatcher_actions["neodb_book_sheet"] ~= nil, "the quick sheet is bindable")
@@ -1179,6 +1225,24 @@ do
         "and is offered under the reader, where a book exists")
     check.eq(Stubs.dispatcher_actions["neodb_post_status"].general, true,
         "while a post is a general action, since it needs no book")
+end
+
+check.section("Where the row sits in the Tools menu")
+do
+    --[[--
+    `sorting_hint` picks the tab, not the place in it: MenuSorter appends anything
+    KOReader's own order does not name to the end, behind every built-in. So the
+    plugin names itself in that order.
+    ]]
+    for _idx, which in ipairs({ "reader", "filemanager" }) do
+        local order = require("ui/elements/" .. which .. "_menu_order")
+        local at, seen = nil, 0
+        for index, id in ipairs(order.tools) do
+            if id == "neodb" then at = index; seen = seen + 1 end
+        end
+        check.eq(seen, 1, which .. ": the row is claimed exactly once")
+        check.eq(at, 4, which .. ": as the fourth Tools row, not the last")
+    end
 end
 
 check.section("The export target is registered at load")
