@@ -307,7 +307,14 @@ function Target:export(t)
         return false
     end
     if total == 0 then
-        Util.notify(_("NeoDB already has every highlight in there."))
+        -- "Already has every highlight" would be a lie when some of them simply
+        -- could not be named, and a clipping we cannot place is one nobody will
+        -- ever hear about otherwise.
+        if unplaceable > 0 then
+            report(0, 0, unlinked, unplaceable)
+        else
+            Util.notify(_("NeoDB already has every highlight in there."))
+        end
         return true
     end
 
