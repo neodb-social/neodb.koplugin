@@ -19,8 +19,10 @@ support both.
 
 ## Install
 
-Download [the latest release](https://github.com/neodb-social/neodb.koplugin/archive/main.zip),
-unzip, rename the folder to `neodb.koplugin` and copy it into KOReader's `plugins` directory:
+Download `neodb.koplugin.zip` from
+[the latest release](https://github.com/neodb-social/neodb.koplugin/releases/latest)
+and unzip it into KOReader's `plugins` directory. It already holds a correctly
+named folder, so there is nothing to rename:
 
 | Device | Path |
 | --- | --- |
@@ -122,61 +124,45 @@ Written offline, the post is queued and goes out with everything else.
 
 ## Sharing every highlight
 
-Rather than picking quotes one at a time, a book can post them all as you make
-highlights: **NeoDB → Settings for this book → [ ] Upload new highlights and notes**. 
-Check this, each highlight or note you make in this book will be sent to NeoDB as notes.
+Instead of picking quotes one at a time, a book can post each highlight as you
+make it: **NeoDB → Settings for this book → [ ] Upload new highlights and notes**.
 
-- Previously notes and highlights are left alone. Only highlights made after you flip
-  the switch go out, so turning it on never flood a backlog into your timeline.
-  **NeoDB → Upload all highlights and notes…** will upload the backlog.
-- Upload is in background. An action is queued 10 seconds after you last make or update
-  your annotations.
-- Highlights done in offline will be queued and go out later.
-- Deleting works in step, in books with this switch on: delete a highlight the
-  plugin has posted and the matching NeoDB note is deleted too. One deleted before
-  its post ever went out is simply never posted. Notes posted deliberately — the
-  share composer, or an export from a book whose switch is off — stay on NeoDB.
+- Only highlights made after you turn the switch on are posted, so turning it on
+  never floods your timeline with a backlog. To send the backlog, use
+  **NeoDB → Upload all highlights and notes…**.
+- Uploads happen quietly in the background, 10 seconds after you stop editing.
+  Offline, they queue like everything else.
+- Deletions keep step. Delete a highlight and its NeoDB note goes too. One deleted
+  before its post went out is never posted at all. Notes you posted on purpose,
+  from the share composer or an export, stay.
 
-Setting **Upload new highlights and notes** globally decides the setting for a
-book when it's initially linked; every book keeps its own switch afterwards.
-**Crosspost shared highlights** decides whether these notes reach your followers on
-you connected Mastodon/Bluesky account.
+The global **Upload new highlights and notes** setting only decides what a book
+starts with when you link it; each book keeps its own switch afterwards.
+**Crosspost shared highlights** decides whether these notes also reach your
+followers on a connected Mastodon or Bluesky account.
 
 ## Using KOReader's own "Export highlights"
 
-NeoDB also registers itself as a target in KOReader's built-in exporter, so it
-appears in **☰ → Tools → Export highlights → Choose formats and services**
-alongside Markdown, JSON and Readwise. Tick it once — it asks first — and every
-one of the exporter's own entry points can post to NeoDB:
+NeoDB registers itself as an export target, so it appears in **☰ → Tools → Export
+highlights → Choose formats and services** next to Markdown, JSON and Readwise.
+Tick it once, and it asks before turning on. Every one of the exporter's entry
+points can then post to NeoDB, including all books in history and a
+multi-selection in the file browser. This is the only path that reaches many books
+at once, and the only one that works from the file browser. It also obeys the
+exporter's own highlight style and colour filters.
 
-- **Export all notes in current book**
-- **Export all notes in all books in history**
-- **Export highlights** on a multi-selection in the file browser
-- the matching gesture and profile actions
-
-This is the only path that reaches many books at once, and the only one that works
-from the file browser. It also honours the exporter's own **Filter by highlight
-style** and **Filter by highlight colour**, so you can post only the highlights in
-one colour.
-
-Worth knowing:
-
-- **Only books linked to a NeoDB entry are posted from.** Unlinked books are
-  skipped, and the count is reported. Nothing goes looking for matches on its own.
-- **A highlight is still posted only once.** KOReader's exporter re-sends
-  everything every time it runs, but this plugin keeps its own record per book, so
-  exporting the same book twice adds nothing the second time.
-- Exporting posts from a linked book **whether or not that book's own "Upload new
-  highlights and notes" switch is on**. That switch governs the silent automatic
-  mirror; choosing to export is a deliberate act.
-- KOReader exports to every enabled target at once, so with NeoDB ticked, an
-  export to Markdown will also post to NeoDB — and will want a network connection.
-  Untick NeoDB when you only want a file.
-- The upload queue holds 100 items. A backlog larger than that is queued 100 at a
-  time: the rest is left untouched and the notification tells you to export again
-  once those have gone up, which continues exactly where it stopped.
-- Needs KOReader **v2025.04** or newer, which is where the exporter gained a way
-  for plugins to add targets. On older builds nothing appears, and the plugin's own
+- **Only linked books are posted from.** Unlinked ones are skipped and counted.
+  Nothing goes looking for matches on its own.
+- **Each highlight is still posted once.** The exporter re-sends everything on
+  every run, but the plugin keeps its own record per book.
+- Exporting posts from a linked book whether or not that book's own switch is on.
+  The switch governs the automatic mirror; exporting is something you chose to do.
+- KOReader exports to every enabled target at once, so an export to Markdown will
+  also post to NeoDB, and will want a network connection. Untick NeoDB when you
+  only want a file.
+- A backlog larger than the 100-item queue goes out in runs. You are told how many
+  are left, and the next export continues where the last one stopped.
+- Needs KOReader **v2025.04** or newer. On older builds nothing appears, and
   **Upload all highlights and notes…** does the same job for one book.
 
 ## How progress is reported
@@ -199,24 +185,22 @@ is what sending it implies. A book already marked, including *Finished* or
 
 ## Working offline
 
-- Marks, progress updates and notes made offline are **queued**, and
-  the status you set is shown straight away.
-- The queue is uploaded the next time you are online — automatically when you
-  open a book, or on demand via **NeoDB → Uploads**. The menu lists exactly what
-  is waiting.
-- Repeated progress updates for the same book collapse to the newest one; notes
-  are each kept separately.
-- An update that can never succeed — a deleted item, a body the server rejects —
-  is discarded rather than blocking the queue behind it.
-- Uploading **stops** rather than discards when the problem is the connection or
-  the account: a refused login, a rate limit, a server that stopped answering.
-  Everything waits, in order, and the **Uploads** row says why it is paused. A
-  refused login is also announced once, since it will not fix itself.
-- The queue holds 100 uploads. Once it is full it **refuses** new ones instead of
-  dropping the oldest, and whatever was refused is left unrecorded so the next
-  attempt picks it up. Uploading a backlog of highlights larger than that is
-  therefore done in runs, and you are told how many are still to go.
-- The automatic syncs never switch Wi-Fi on by themselves.
+Marks, progress, notes and posts made offline are **queued**, and what you set is
+shown straight away. The queue goes out the next time you are online:
+automatically when you open a book, or on demand from **NeoDB → Uploads**, which
+lists exactly what is waiting. Nothing here switches Wi-Fi on by itself.
+
+- Repeated progress updates for one book collapse to the newest. Notes are each
+  kept separately.
+- An upload that can never succeed, such as one for a deleted entry, is discarded
+  rather than blocking the queue behind it.
+- Uploading **stops** instead when the trouble is the connection or your account,
+  such as a refused login or a rate limit. Everything waits in order, and the
+  **Uploads** row says why. A refused login is announced once, since it will not
+  fix itself.
+- The queue holds 100. When it is full it **refuses** new uploads rather than
+  dropping old ones, so nothing already recorded is lost. A larger backlog goes
+  out in runs, and you are told how many are still to go.
 
 ## Settings
 
@@ -234,31 +218,23 @@ is what sending it implies. A book already marked, including *Finished* or
 
 ## Technical notes and limitations
 
-- **Your token is stored in plain text** on device. Anyone with access to the
-  device or a backup of it can read them. 
-  Revoke from your NeoDB instance if a device is lost.
-- Your device's model name may be sent to your NeoDB instance, so it may show up
-  in your timeline (e.g. "sent from Kobo") with some app. No other device 
-  identifier were shared with your NeoDB instance. 
-- Requests block KOReader's UI thread and times out after 25 seconds.
+- **Your access token is stored in plain text** on the device. Anyone with the
+  device, or with a backup of it, can read it. Revoke it on your NeoDB instance if
+  you lose the device.
+- Your device model may be sent to your instance, so posts can show something like
+  "from Kobo" in some apps. Nothing else identifying is sent.
+- Requests block KOReader's UI thread, and time out after 25 seconds.
 - Posting a mark replaces it on the server, so every write resends the rating,
   comment and tags you already had. If you edit a mark on the web while the book
   is open, use **Refresh from NeoDB** before changing it here.
 - When NeoDB merges two entries, the link follows the surviving one by itself.
-- A shared highlight is posted **once**, as it stands ten seconds after you last
-  touch it. Editing it afterwards, or adding a note to one that has already gone
-  out, changes nothing on NeoDB — KOReader does not even announce an edit to a
-  note's text. Deleting it does: in a book whose "Upload new highlights and notes"
-  switch is on, the NeoDB note goes too (or, if it was still waiting to upload, is
-  quietly withdrawn). The id NeoDB gives each note is recorded against the
-  highlight that produced it — that is what deletion uses, and what a later
-  version would need to push an edit through. It reaches the book's sidecar
-  whether that book is open, closed, or has been renamed since the highlight was
-  queued — in the last case when you next open it. A note posted by a version of
-  this plugin from before ids were recorded cannot be deleted from here.
+- A shared highlight is posted once, as it stands 10 seconds after you last touch
+  it. Editing it afterwards changes nothing on NeoDB, because KOReader does not
+  announce an edit to a note's text. Deleting it does work, as above.
+- A note posted by a version of this plugin from before note ids were recorded
+  cannot be deleted from here.
 - Renaming or deleting a book does not disturb anything waiting to upload: queued
-  notes are addressed to the NeoDB entry, not to the file. A book deleted along
-  with its sidecar loses its link, and nothing is written back to it.
+  notes are addressed to the NeoDB entry, not to the file.
 
 ## Source code layout
 
@@ -267,25 +243,23 @@ is what sending it implies. A book already marked, including *Finished* or
 | `main.lua` | Plugin lifecycle, menus, gestures, highlight hook, auto-sync events |
 | `neodb_api.lua` | HTTP client, endpoint wrappers, upload queue transport |
 | `neodb_store.lua` | Account, preferences, per-book link, queue persistence |
-| `neodb_login.lua` | Instance picker and the three sign-in flows |
+| `neodb_login.lua` | Instance picker and the sign-in flows |
 | `neodb_match.lua` | Book identification, search UI, link management |
 | `neodb_actions.lua` | Status, rating, progress, notes, quotes |
 | `neodb_annotations.lua` | Mirroring KOReader's own highlights and notes to NeoDB |
 | `neodb_exporter.lua` | NeoDB as a target in KOReader's "Export highlights" |
 | `neodb_util.lua` | ISBN checksums, star rendering, JSON-null scrubbing, helpers |
+| `spec/` | Tests. `./spec/run.sh` runs them under luajit, with KOReader stubbed. |
 
-Two things worth knowing before editing:
+Two things to know before editing:
 
-- KOReader bundles **luajson**, which has two traps, both of which bit this
-  plugin on real hardware:
-  - It decodes JSON `null` to a sentinel *function*, not `nil`, so every
-    response goes through `Util.scrubNulls`. Without it,
-    `if mark.comment_text then` is true for a null comment.
-  - It infers array-ness from a table's contents and reports an **empty** table
-    as *not* an array, so `{}` is encoded as the JSON object `{}`. Any list field
-    must go through `Util.jsonArray` (or be omitted). This is what made NeoDB
-    reject every mark with HTTP 422.
+- KOReader bundles **luajson**, which has two traps that both bit this plugin on
+  real hardware. It decodes JSON `null` to a sentinel *function* rather than
+  `nil`, so responses go through `Util.scrubNulls`; and it encodes an empty table
+  as the JSON object `{}` rather than `[]`, so list fields go through
+  `Util.jsonArray` or are left out. The second one made NeoDB reject every mark
+  with HTTP 422.
 - Sibling modules are `neodb_`-prefixed because KOReader puts every plugin
-  directory on one shared `package.path`, where a generic `api.lua` would
-  collide with another plugin's.
+  directory on one shared `package.path`, where a generic `api.lua` would collide
+  with another plugin's.
 
