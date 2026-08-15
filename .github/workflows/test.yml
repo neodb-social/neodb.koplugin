@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luajit
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      # Every module is loaded by the harness, but this catches one that has been
+      # added and not wired in yet.
+      - name: Check every module compiles
+        run: |
+          set -eu
+          for file in *.lua spec/*.lua; do
+            luajit -b "$file" /dev/null
+          done
+
+      # G_reader_settings is a global, so compiling proves nothing about it. Only
+      # the exporter may touch it: it keeps its switch in KOReader's own settings.
+      - name: Check nothing else reaches for G_reader_settings
+        run: |
+          set -eu
+          if grep -l "G_reader_settings" *.lua | grep -v "^neodb_exporter.lua$"; then
+            echo "G_reader_settings used outside neodb_exporter.lua" >&2
+            exit 1
+          fi
+
+      - name: Run the harnesses
+        run: ./spec/run.sh

@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luajit
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      # A release that does not pass its own tests is not worth publishing.
+      - name: Run the harnesses
+        run: ./spec/run.sh
+
+      # The zip holds what KOReader loads and nothing else: the Lua modules and
+      # the licence they are under. No README, no screenshots, no tests.
+      #
+      # It is built with the plugin directory inside it, already correctly named,
+      # so unzipping into KOReader's plugins directory is the whole install.
+      - name: Build the plugin zip
+        run: |
+          set -eu
+          mkdir -p dist/neodb.koplugin
+          cp LICENSE _meta.lua main.lua neodb_*.lua dist/neodb.koplugin/
+
+          # Guard against a module added under a name the copy above does not
+          # match: a plugin shipped without one of its files fails at load.
+          git ls-files '*.lua' | grep -v '^spec/' | sort > /tmp/tracked
+          (cd dist/neodb.koplugin && ls *.lua | sort) > /tmp/packaged
+          if ! diff -u /tmp/tracked /tmp/packaged; then
+            echo "the zip does not match the modules in the repository" >&2
+            exit 1
+          fi
+
+          (cd dist && zip -r ../neodb.koplugin.zip neodb.koplugin)
+          unzip -l neodb.koplugin.zip
+
+      - name: Attach it to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            neodb.koplugin.zip --clobber
+
+      # So a manual run can be checked without publishing anything.
+      - name: Keep it as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neodb.koplugin
+          path: neodb.koplugin.zip
