@@ -131,15 +131,16 @@ function Match.linkTo(ctx, item, on_done)
         ctx.store:cacheMark(ctx.ui.doc_settings, mark)
     end
 
-    local shelf = ok and mark and mark.shelf_type or nil
-    if shelf then
-        Util.alert(T(_("Linked to “%1”.\n\nCurrent NeoDB status: %2."),
-            link.title or "?", Util.shelfLabel(shelf)))
-    else
-        Util.alert(T(_("Linked to “%1”."), link.title or "?"))
-    end
+    --[[--
+    The status just read is what the dialog opens on, so this costs no extra
+    request. `neodb_actions` is resolved here rather than at the top of the file:
+    it requires this module, and requiring it back would be a cycle.
 
-    if on_done then on_done() end
+    `on_done` waits for the dialog rather than firing under it -- whoever asked
+    for the match usually wants the screen next, and today that meant a sheet
+    opening on top of the answer.
+    ]]
+    require("neodb_actions").showLinkOptions(ctx, on_done)
 end
 
 function Match.confirmLink(ctx, item, on_done)

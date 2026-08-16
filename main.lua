@@ -342,7 +342,7 @@ function NeoDB:buildMenu()
         })
         table.insert(items, {
             text = _("Upload all highlights and notes…"),
-            help_text = _("Posts every highlight and note in this book that NeoDB has not been told about, however long ago you made it. Works whether the per-book switch under “This book” is on or not."),
+            help_text = _("Posts every highlight and note in this book that NeoDB has not been told about, however long ago you made it. Works whether the per-book switch under “Settings for this book” is on or not."),
             enabled_func = function()
                 return self.store:getLink(self.ui.doc_settings) ~= nil
             end,
@@ -464,6 +464,13 @@ function NeoDB:shelfMenu()
         return items
     end
 
+    --[[--
+    Statuses and nothing else.
+
+    A row that was not one of them read as a fifth shelf here, which is a poor
+    trade for documenting a gesture. The quick sheet keeps its long press on the
+    row this menu hangs off, and its own entry in the gesture manager.
+    ]]
     local items = {}
     for _idx, shelf in ipairs(Util.SHELVES) do
         table.insert(items, {
@@ -475,24 +482,8 @@ function NeoDB:shelfMenu()
             radio = true,
             keep_menu_open = false,
             callback = function() Actions.setShelf(ctx, shelf) end,
-            separator = shelf == Util.SHELVES[#Util.SHELVES],
         })
     end
-
-    --[[--
-    The one row that is not a status.
-
-    The quick sheet is opened by holding the row above this one, and nothing said
-    so: KOReader shows `help_text` on hold only when a row has no `hold_callback`,
-    so the hint cannot go where the gesture is. A row that opens the sheet can,
-    and it is also how a reader finds the thing worth binding to a gesture.
-    ]]
-    table.insert(items, {
-        text = _("Quick actions…"),
-        help_text = _("One screen with the status, progress, rating and notes on it. Holding the row this menu came from opens it too, as does the “NeoDB: book actions” gesture."),
-        keep_menu_open = false,
-        callback = function() Actions.showSheet(ctx) end,
-    })
 
     -- Removing the mark lives under "This book", with the other undoing.
     return items
@@ -522,7 +513,22 @@ function NeoDB:linkMenu()
             end,
         },
         {
-            text = _("Upload new highlights and notes for this book"),
+            text = _("Update progress automatically"),
+            help_text = _("Sends where you are in this book to NeoDB every hour while you read, and when the book is closed — whenever the position moved. Queued quietly; nothing turns on Wi-Fi."),
+            enabled_func = function()
+                return self.store:getLink(self.ui.doc_settings) ~= nil
+            end,
+            checked_func = function()
+                return self.store:autoProgress(self.store:getLink(self.ui.doc_settings))
+            end,
+            callback = function()
+                local link = self.store:getLink(self.ui.doc_settings)
+                self.store:setAutoProgress(self.ui.doc_settings,
+                    not self.store:autoProgress(link))
+            end,
+        },
+        {
+            text = _("Upload new highlights and notes automatically"),
             help_text = _("Posts every highlight and note you make in this book from now on to NeoDB, quietly and without asking: the passage, whatever you wrote about it, and where in the book it is. What the book already holds is left alone."),
             enabled_func = function()
                 return self.store:getLink(self.ui.doc_settings) ~= nil
@@ -534,7 +540,7 @@ function NeoDB:linkMenu()
             separator = true,
         },
         {
-            text = _("Remove mark from NeoDB…"),
+            text = _("Remove mark…"),
             help_text = _("Deletes your status, rating and comment for this book from NeoDB. The book stays linked."),
             enabled_func = function()
                 return self.store:getLink(self.ui.doc_settings) ~= nil
@@ -758,23 +764,35 @@ function NeoDB:settingsMenu()
             end,
             sub_item_table = unit_items,
         },
+        --[[--
+        A submenu rather than two more rows in this list, because neither of these
+        does anything by itself. They are what the dialog offers when a book is
+        linked, and every answer is written onto that book -- so a row sitting
+        among switches that act immediately would be read as one of them.
+        ]]
         {
-            text = _("Automatically update progress"),
-            help_text = _("Every hour while reading, and when the book is closed -- whenever the position moved. Only for books already marked on NeoDB. Queued silently; nothing turns on Wi-Fi."),
-            checked_func = function() return store:get("auto_progress") end,
-            callback = function() store:toggle("auto_progress") end,
+            text = _("Defaults for a new book"),
+            help_text = _("What the dialog offers when you link a book. Each book then keeps its own switches, under “Settings for this book”."),
+            sub_item_table = {
+                {
+                    text = _("Update progress automatically"),
+                    help_text = _("Progress goes out every hour while you read, and when the book is closed, whenever the position moved. It is queued quietly; nothing turns on Wi-Fi."),
+                    checked_func = function() return store:get("auto_progress") end,
+                    callback = function() store:toggle("auto_progress") end,
+                },
+                {
+                    text = _("Upload new highlights and notes"),
+                    help_text = _("Every highlight and note you then make in that book is posted to NeoDB as a note."),
+                    checked_func = function() return store:get("auto_upload_annotations") end,
+                    callback = function() store:toggle("auto_upload_annotations") end,
+                },
+            },
         },
         {
             text = _("Mark as Finished at the end of a book"),
             help_text = _("When you reach the last page of a linked book, set its NeoDB status to Finished."),
             checked_func = function() return store:get("auto_mark_finished") end,
             callback = function() store:toggle("auto_mark_finished") end,
-        },
-        {
-            text = _("Upload new highlights and notes"),
-            help_text = _("What a book starts with when it is linked. Every highlight and note you then make in it is posted to NeoDB as a note."),
-            checked_func = function() return store:get("auto_upload_annotations") end,
-            callback = function() store:toggle("auto_upload_annotations") end,
         },
         {
             text = _("Quote highlights as block quotes"),
@@ -923,11 +941,12 @@ connection. It goes out with the next upload instead.
 @treturn bool whether an update was queued
 ]]
 function NeoDB:queueProgressIfMoved()
-    if not self.store:get("auto_progress") then return false end
     if not self.store:isLoggedIn() then return false end
 
     local link = self.store:getLink(self.ui.doc_settings)
     if not link then return false end
+    -- Per book, so the link has to be in hand before the switch can be read.
+    if not self.store:autoProgress(link) then return false end
 
     -- Progress hangs off the mark, so there has to be one. Creating a mark as a
     -- side effect of a timer or of closing a book would be presumptuous, so skip.

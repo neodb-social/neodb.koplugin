@@ -463,11 +463,19 @@ Gives a dialog stub a button table a test can operate.
 Rows come from `buttons` (InputDialog, ButtonDialog) or `buttons_table`
 (TextViewer). `press` and `label` work by button id where there is one, so a test
 can catch a `relabel` that stopped finding its button.
+
+**The field name is part of what is being tested.** KOReader has two spellings
+and no common base: `InputDialog` and `TextViewer` keep theirs in `button_table`,
+`ButtonDialog` in `buttontable` (`buttondialog.lua:123`) plus a `getButtonById`
+of its own (`:306`). This used to hand every widget a `button_table` whatever it
+really was, which made a `relabel` that could never find its button pass here and
+do nothing on a device -- the dialog simply never repainted. So each kind gets
+only what it actually has.
 ]]
 local function pressable(widget)
     local rows = widget.buttons or widget.buttons_table or {}
 
-    widget.button_table = {
+    local buttons = {
         getButtonById = function(_self, id)
             for _r, row in ipairs(rows) do
                 for _c, button in ipairs(row) do
@@ -482,6 +490,13 @@ local function pressable(widget)
             return nil
         end,
     }
+
+    if widget.kind == "ButtonDialog" then
+        widget.buttontable = buttons
+        function widget:getButtonById(id) return buttons:getButtonById(id) end
+    else
+        widget.button_table = buttons
+    end
 
     function widget:findButton(id_or_text)
         for _r, row in ipairs(rows) do
@@ -726,12 +741,25 @@ modules["socketutil"] = {
     SINK_TIMEOUT_CODE = "sink timeout",
 }
 
+local unpacker = table.unpack or unpack
+
 modules["socket"] = {
+    --[[--
+    Drops the first `count` values and hands back the rest.
+
+    Two Lua traps meet here, and both used to bite. `a and f(x) or g(x)`
+    **truncates to one value**, so returning the unpack that way handed `Api:raw`
+    a code and no headers -- which is exactly its signature for a transport
+    failure, so every stubbed response came back as `network_error`. And `#` on a
+    list with a nil in it is undefined, which is the shape LuaSocket answers a
+    real failure with, so the count comes from `select("#", ...)` instead.
+    ]]
     skip = function(count, ...)
+        local n = select("#", ...)
         local values = { ... }
         local out = {}
-        for i = count + 1, #values do table.insert(out, values[i]) end
-        return table.unpack and table.unpack(out) or unpack(out)
+        for i = count + 1, n do out[i - count] = values[i] end
+        return unpacker(out, 1, n - count)
     end,
     gettime = function() return 0 end,
 }

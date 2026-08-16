@@ -100,10 +100,9 @@ a link made on one server will not be used to post to another.
 Everything is reachable from the book-actions sheet above, or from the menu:
 
 - **The top row** names where the book stands, and opens the shelf list that
-  changes it: Want to read / Reading / Finished / Dropped. Long-press it for the
-  book-actions sheet, which is also the **Quick actions…** row at the foot of
-  that shelf list. Before you have signed in or linked the book, that row offers
-  the step you are missing instead of the shelves.
+  changes it: Want to read / Reading / Finished / Dropped, and nothing else.
+  Long-press it for the book-actions sheet. Before you have signed in or linked
+  the book, that row offers the step you are missing instead of the shelves.
 - **Update progress** — updates reading progress manually. See below.
 - **Rate and comment** — rating from ½ to 5 starts, plus an optional comment.
 - **Add note** — make a note, optionally stamped with your position.
@@ -137,7 +136,7 @@ Written offline, the post is queued and goes out with everything else.
 ## Sharing every highlight
 
 Instead of picking quotes one at a time, a book can post each highlight as you
-make it: **NeoDB → Settings for this book → [ ] Upload new highlights and notes**.
+make it: **NeoDB → Settings for this book → [ ] Upload new highlights and notes automatically**.
 
 - Only highlights made after you turn the switch on are posted, so turning it on
   never floods your timeline with a backlog. To send the backlog, use
@@ -148,10 +147,10 @@ make it: **NeoDB → Settings for this book → [ ] Upload new highlights and no
   before its post went out is never posted at all. Notes you posted on purpose,
   from the share composer or an export, stay.
 
-The global **Upload new highlights and notes** setting only decides what a book
-starts with when you link it; each book keeps its own switch afterwards.
-**Crosspost shared highlights** decides whether these notes also reach your
-followers on a connected Mastodon or Bluesky account.
+The switch is offered when you link the book, and **Defaults for a new book →
+Upload new highlights and notes** only decides which way it is offered; each book
+keeps its own answer afterwards. **Crosspost shared highlights** decides whether
+these notes also reach your followers on a connected Mastodon or Bluesky account.
 
 ## Using KOReader's own "Export highlights"
 
@@ -195,6 +194,11 @@ A book you have not marked yet is put on **Reading** when you send progress, whi
 is what sending it implies. A book already marked, including *Finished* or
 *Dropped*, is left exactly where you put it.
 
+A book can also report on its own, every hour while you read and when it is
+closed, whenever the position moved. That is **Update progress automatically**,
+per book: offered when you link it, and changeable under **Settings for this
+book**. It is queued quietly, so reading never waits on the network.
+
 ## Working offline
 
 Marks, progress, notes and posts made offline are **queued**, and what you set is
@@ -223,10 +227,35 @@ lists exactly what is waiting. Nothing here switches Wi-Fi on by itself.
 | Crosspost to connected social networks | off | Marks and notes always reach NeoDB; this also crossposts them to your connected Mastodon and/or Bluesky account. |
 | Quote highlights as block quotes | on | Prefixes shared highlights with `> `. |
 | Pairing service | `p.neodb.net` | Used by QR sign-in. Clear it to hide that option. |
-| Automatically update progress | off | Every hour while reading and when the book is closed, whenever the position moved. Only for books already marked. Queued silently — reading never waits on the network. |
 | Mark as Finished at the end of a book | off | Fires when you reach the last page of a linked book. |
-| Upload new highlights and notes | off | What a book starts with when it is linked; each book keeps its own switch under **This book**. See above. |
 | Crosspost shared highlights | off | Whether shared highlights also reach your followers. Separate from the crosspost row above. |
+| Defaults for a new book → Update progress automatically | off | What the dialog offers when you link a book. |
+| Defaults for a new book → Upload new highlights and notes | off | The same, for the highlight mirror. |
+
+Neither row under **Defaults for a new book** does anything by itself. Both are
+what the dialog below opens on, and your answer is written onto that book — so
+changing a default later leaves the books you have already linked alone.
+
+## When you link a book
+
+Linking ends in one dialog, and it is the only place these three are asked
+together:
+
+- **the status** — preselected from whatever NeoDB already holds for the book, or
+  **Reading** when it holds nothing;
+- **Update progress** — this book reports where you are, on its own;
+- **Upload highlights** — this book mirrors each new highlight and note.
+
+There is no way past it but **Save**, because the other two are worthless without
+the first: progress hangs off a status, so a book on no shelf cannot report any.
+If you wanted none of it, **Settings for this book → Remove mark…**
+undoes the status; the switches are on the same submenu.
+
+Saving a status the server already had writes nothing and sends nothing.
+
+Both switches can be changed at any time under **NeoDB → Settings for this
+book**. A book you linked with an older version of this plugin has no answer
+recorded, so it follows the global default until you touch its own switch.
 
 ## Technical notes and limitations
 

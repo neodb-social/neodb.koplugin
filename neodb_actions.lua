@@ -75,9 +75,24 @@ local function hideKeyboard(dialog)
     if dialog and dialog.onCloseKeyboard then dialog:onCloseKeyboard() end
 end
 
+--[[--
+Finds a button by id, whichever kind of dialog is holding it.
+
+The two spellings are not interchangeable and there is no common base: an
+`InputDialog` and a `TextViewer` keep theirs in `button_table`, a `ButtonDialog`
+in `buttontable` -- and only the last exposes a `getButtonById` of its own. Asking
+for the wrong one gets nil, which is indistinguishable from "no such button", so
+this silently did nothing rather than failing loudly.
+]]
+local function buttonById(dialog, id)
+    if dialog.getButtonById then return dialog:getButtonById(id) end
+    local buttons = dialog.button_table or dialog.buttontable
+    return buttons and buttons:getButtonById(id)
+end
+
 --- Replaces a dialog button's label in place, without rebuilding the dialog.
 local function relabel(dialog, id, text)
-    local button = dialog.button_table and dialog.button_table:getButtonById(id)
+    local button = buttonById(dialog, id)
     if not button then return end
     -- Passing the existing width keeps the grid geometry, so no full relayout.
     button:setText(text, button.width)
@@ -1149,6 +1164,149 @@ function Actions.flushQueue(ctx, quiet, on_done)
         end
         if on_done then on_done() end
     end)
+end
+
+-- What a new link is asked about --------------------------------------------
+
+--[[--
+The one question a freshly linked book is worth interrupting for.
+
+Three answers are settled here, and they are settled together on purpose. A
+status is what NeoDB hangs everything else off -- progress cannot be reported for
+a book on no shelf at all -- so asking for it separately, later, is how the two
+switches below it end up on and doing nothing.
+
+Which is why there is no way out but `Save`: the dialog opens on whatever NeoDB
+already holds, or on "Reading" when it holds nothing, and closing it always
+leaves the book somewhere. A reader who wanted none of it has "Remove mark from
+NeoDB…" under "Settings for this book"; that is a rarer thing to want than a
+book being shelved when they linked it.
+
+Both switches open on the global defaults and are written onto this book, so a
+later change to those defaults leaves books already linked alone.
+
+@param on_close called once the dialog is gone, for whoever wants the screen back
+]]
+function Actions.showLinkOptions(ctx, on_close)
+    local link = ctx.store:getLink(ctx.ui.doc_settings)
+    if not link then
+        if on_close then on_close() end
+        return
+    end
+
+    --[[--
+    What the server said, as against what the dialog will do about it. A mark we
+    could not read is not the same as one that is not there: both preselect
+    "Reading", but only the second means the shelf is already right.
+    ]]
+    local known = link.mark_checked ~= nil
+    local server_shelf = link.mark and link.mark.shelf_type or nil
+    local chosen = server_shelf or "progress"
+    local auto_progress = ctx.store:autoProgress(link)
+    local upload = annotations().isEnabled(ctx)
+
+    local title_lines = { T(_("Linked to “%1”"), link.title or "?") }
+    if server_shelf then
+        local state = Util.shelfLabel(server_shelf)
+        local stars = Util.stars(link.mark.rating_grade)
+        if stars then state = state .. "  " .. stars end
+        table.insert(title_lines, T(_("On NeoDB: %1"), state))
+    elseif known then
+        table.insert(title_lines, _("Not on any NeoDB shelf yet"))
+    else
+        table.insert(title_lines, _("Could not read your NeoDB status"))
+    end
+
+    local dialog
+
+    --[[--
+    A switch reads as its own state rather than as a box to tick.
+
+    KOReader's bundled fonts do not reliably carry the ballot-box characters, and
+    a bare tick cannot say "off" -- so these follow the same "label: value" shape
+    the visibility button already uses, and are relabelled in place on tap.
+    ]]
+    local function switch(id, label, get, set)
+        return {
+            id = id,
+            text = T(_("%1: %2"), label, get() and _("on") or _("off")),
+            callback = function()
+                set(not get())
+                relabel(dialog, id, T(_("%1: %2"), label, get() and _("on") or _("off")))
+            end,
+        }
+    end
+
+    local function shelfButton(shelf)
+        local label = Util.shelfLabel(shelf)
+        if chosen == shelf then label = "✓ " .. label end
+        return {
+            id = "shelf_" .. shelf,
+            text = label,
+            callback = function()
+                if chosen == shelf then return end
+                relabel(dialog, "shelf_" .. chosen, Util.shelfLabel(chosen))
+                chosen = shelf
+                relabel(dialog, "shelf_" .. shelf, "✓ " .. Util.shelfLabel(shelf))
+            end,
+        }
+    end
+
+    --[[--
+    Nothing is written until Save, so a reader who changes their mind twice costs
+    one sidecar write rather than four. `nil ~= false` is what pins a default the
+    reader left alone: a fresh link carries no answer, so the first Save records
+    one either way.
+    ]]
+    local function save()
+        UIManager:close(dialog)
+
+        if link.auto_progress ~= auto_progress then
+            ctx.store:setAutoProgress(ctx.ui.doc_settings, auto_progress)
+        end
+        if annotations().isEnabled(ctx) ~= upload then
+            annotations().setEnabled(ctx, upload)
+        end
+
+        -- Only when it would actually change something: re-posting the shelf the
+        -- server already has is a request, and a notification, for nothing.
+        if chosen ~= server_shelf then
+            Actions.setShelf(ctx, chosen, function()
+                if on_close then on_close() end
+            end)
+            return
+        end
+        if on_close then on_close() end
+    end
+
+    dialog = ButtonDialog:new{
+        title = table.concat(title_lines, "\n"),
+        title_align = "center",
+        -- Save is the only way out: see above.
+        dismissable = false,
+        buttons = {
+            { shelfButton("wishlist"), shelfButton("progress") },
+            { shelfButton("complete"), shelfButton("dropped") },
+            {
+                switch("auto_progress", _("Update progress"),
+                    function() return auto_progress end,
+                    function(on) auto_progress = on end),
+            },
+            {
+                switch("upload", _("Upload highlights"),
+                    function() return upload end,
+                    function(on) upload = on end),
+            },
+            {
+                {
+                    id = "save",
+                    text = _("Save"),
+                    callback = save,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
 end
 
 -- The quick-action sheet ----------------------------------------------------

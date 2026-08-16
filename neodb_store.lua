@@ -25,13 +25,20 @@ local DEFAULTS = {
     default_visibility     = 0,       -- public
     post_to_fediverse      = false,   -- don't broadcast unless asked
     progress_unit          = "auto",  -- auto | page | percentage
-    auto_progress          = false,   -- hourly and on close, when the position moved
     auto_mark_finished     = false,
     quote_as_blockquote    = true,
 
-    --- Whether a newly linked book mirrors its highlights and notes to NeoDB.
-    --- Each book keeps its own switch; this is only what a new link starts with.
-    auto_upload_annotations = false,
+    --[[--
+    The two "defaults for a new book" switches.
+
+    Neither decides anything by itself. Both are what the dialog that follows a
+    link offers, and the reader's answer is written onto that book's own link --
+    so a book made before any of this existed, which was never offered the
+    dialog, is the one case where these are still read directly. See
+    `Store:autoProgress`.
+    ]]
+    auto_progress           = false,  -- hourly and on close, when the position moved
+    auto_upload_annotations = false,  -- mirror this book's highlights and notes
 
     --- Crossposting for shared highlights, deliberately separate from
     --- `post_to_fediverse`: a book's worth of quotes is a different proposition
@@ -258,6 +265,32 @@ function Store:cacheMark(doc_settings, mark)
     ]]
     link.mark_checked = Util.timestamp()
     self:setLink(doc_settings, link)
+end
+
+--[[--
+Whether this book reports where the reader is, on its own.
+
+Per book, because "keep NeoDB posted about this one" is a decision about a book
+and not about a device: a reread being logged in public and a technical manual
+being dipped into want different answers.
+
+A link with no answer recorded is one made before the question was asked, so it
+keeps following the global default until its own switch is touched. Every link
+made since is pinned by the dialog that follows it, default included, so this
+fallback only ever reaches the old ones.
+]]
+function Store:autoProgress(link)
+    if type(link) ~= "table" then return false end
+    if link.auto_progress ~= nil then return link.auto_progress == true end
+    return self:get("auto_progress") == true
+end
+
+function Store:setAutoProgress(doc_settings, enabled)
+    local link = self:getLink(doc_settings)
+    if not link then return false end
+    link.auto_progress = enabled == true
+    self:setLink(doc_settings, link)
+    return link.auto_progress
 end
 
 function Store:cacheProgress(doc_settings, progress_type, progress_value)

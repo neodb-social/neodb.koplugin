@@ -19,6 +19,7 @@ local NeoDB = require("main")
 local Actions = require("neodb_actions")
 local Annotations = require("neodb_annotations")
 local Api = require("neodb_api")
+local Match = require("neodb_match")
 local Store = require("neodb_store")
 local Util = require("neodb_util")
 
@@ -196,6 +197,23 @@ do
     check.eq(migrated.settings:readSetting("auto_progress_on_close"), nil,
         "and the old key is removed")
 
+    --[[--
+    Automatic progress is per book now, and the global is what a new one starts
+    with. A link made before the question was asked carries no answer, so it goes
+    on following that global until its own switch is touched -- otherwise every
+    book somebody had already linked would go quiet on upgrade, with no dialog
+    coming to ask, since the dialog only follows a fresh link.
+    ]]
+    reset()
+    store = Store:new()
+    check.eq(store:autoProgress({ uuid = "x" }), false,
+        "a link with no answer follows the global default")
+    store:set("auto_progress", true)
+    check.eq(store:autoProgress({ uuid = "x" }), true, "including when that default is on")
+    check.eq(store:autoProgress({ uuid = "x", auto_progress = false }), false,
+        "but a book that has answered outranks it")
+    check.eq(store:autoProgress(nil), false, "and no link at all is not a book to report on")
+
     reset()
     store = Store:new()
     store:enqueue({ label = "a", dedup = "x" })
@@ -326,8 +344,7 @@ do
     -- Which is the whole point of the hourly update.
     reset()
     plugin = newPlugin{ page = 100, pages = 400, percent = 0.10, footer_percent = 0.10 }
-    linkBook(plugin)
-    plugin.store:set("auto_progress", true)
+    linkBook(plugin, { auto_progress = true })
     plugin.store:cacheMark(plugin.ui.doc_settings, { shelf_type = "progress" })
     Stubs.online = false
 
@@ -500,6 +517,7 @@ do
         },
     }
     linkBook(plugin, { annotation_sync = { enabled = false, since = "2026-07-01 00:00:00" } })
+    Stubs.online = false -- so the queue is not drained out from under the check
 
     Annotations.uploadAll(plugin.ctx)
     check.eq(plugin.store:queueCount(), 2,
@@ -758,10 +776,18 @@ check.section("Automatic progress")
 do
     reset()
     local plugin = newPlugin{ paging = true, page = 100, pages = 400 }
-    linkBook(plugin)
+    linkBook(plugin, { auto_progress = false })
     check.eq(plugin:queueProgressIfMoved(), false, "nothing is sent while the switch is off")
 
+    --[[--
+    And the switch is this book's, not the device's: a global left on does not
+    speak for a book that has answered the question itself.
+    ]]
     plugin.store:set("auto_progress", true)
+    check.eq(plugin:queueProgressIfMoved(), false,
+        "not even with the default for new books on, once this one has said no")
+
+    plugin.store:setAutoProgress(plugin.ui.doc_settings, true)
     check.eq(plugin:queueProgressIfMoved(), false,
         "nor for a book with no mark, since progress hangs off one")
 
@@ -785,6 +811,96 @@ do
     plugin:onCloseDocument()
     check.eq(UIManager:scheduledCount(plugin.progress_task), 0,
         "and closing the book stops the clock")
+end
+
+check.section("What a new link is asked about")
+do
+    --[[--
+    Linking a book ends in one dialog with three answers on it, and the reason
+    they are together is that two of them are worthless without the first: a book
+    on no shelf cannot report progress, so a status asked for separately, later,
+    is how the switches end up on and silent.
+    ]]
+    reset()
+    local plugin = newPlugin{ paging = true, page = 100, pages = 400 }
+    Stubs.respond = function(request)
+        if request.method == "GET" then
+            return 200, {}, '{"shelf_type":"progress","rating_grade":8,"comment_text":"good"}'
+        end
+        return 200, {}, "{}"
+    end
+    Match.linkTo(plugin.ctx, { uuid = "item-1", title = "Dune", url = "/book/item-1" })
+
+    local dialog = Stubs.lastShown("ButtonDialog")
+    check.ok(dialog ~= nil, "linking opens the dialog rather than an alert")
+    check.eq(dialog.dismissable, false, "which cannot be tapped away, since a status is the point")
+    check.ok(dialog.title:find("On NeoDB: Reading", 1, true) ~= nil,
+        "and it opens on what the server already holds")
+    check.eq(dialog:label("shelf_progress"), "✓ Reading", "with that shelf preselected")
+    check.eq(dialog:label("auto_progress"), "Update progress: off",
+        "both switches showing the default for a new book")
+    check.eq(dialog:label("upload"), "Upload highlights: off")
+
+    -- Saving what the server already said posts nothing: a re-marked book is a
+    -- request and a notification for no change at all.
+    dialog:press("save")
+    check.eq(plugin.store:queueCount(), 0, "saving an unchanged status writes no mark")
+    local link = plugin.store:getLink(plugin.ui.doc_settings)
+    check.eq(link.auto_progress, false,
+        "but the answer is pinned, so a later change of default leaves this book alone")
+
+    --[[--
+    A book NeoDB has never heard of still leaves the dialog on a shelf, and the
+    two switches open whichever way the defaults say -- which is all those globals
+    do now.
+    ]]
+    reset()
+    plugin = newPlugin{ paging = true, page = 100, pages = 400 }
+    plugin.store:set("auto_progress", true)
+    plugin.store:set("auto_upload_annotations", true)
+    Stubs.respond = function(request)
+        if request.method == "GET" then return 404, {}, "{}" end
+        return 200, {}, "{}"
+    end
+    Match.linkTo(plugin.ctx, { uuid = "item-1", title = "Dune", url = "/book/item-1" })
+    dialog = Stubs.lastShown("ButtonDialog")
+    check.ok(dialog.title:find("Not on any NeoDB shelf yet", 1, true) ~= nil,
+        "an unmarked book says so")
+    check.eq(dialog:label("shelf_progress"), "✓ Reading",
+        "and still opens on Reading, which is what linking a book usually means")
+
+    check.eq(dialog:label("auto_progress"), "Update progress: on",
+        "the switches open whichever way the defaults say")
+    check.eq(dialog:label("upload"), "Upload highlights: on")
+
+    dialog:press("shelf_complete")
+    check.eq(dialog:label("shelf_complete"), "✓ Finished", "picking another moves the tick")
+    check.eq(dialog:label("shelf_progress"), "Reading", "off the one that had it")
+
+    dialog:press("auto_progress")
+    check.eq(dialog:label("auto_progress"), "Update progress: off",
+        "a switch says which way it is, since a tick alone cannot say “off”")
+    dialog:press("auto_progress")
+    check.eq(dialog:label("auto_progress"), "Update progress: on", "and turns back")
+    dialog:press("upload")
+    check.eq(dialog:label("upload"), "Upload highlights: off")
+
+    check.eq(plugin.store:getLink(plugin.ui.doc_settings).auto_progress, nil,
+        "and nothing is written while the reader is still deciding")
+
+    Stubs.online = false -- so the mark stays in the queue to be looked at
+    dialog:press("save")
+    link = plugin.store:getLink(plugin.ui.doc_settings)
+    check.eq(link.auto_progress, true,
+        "Save records the switches on the book, the ones left alone included")
+    check.eq(link.annotation_sync.enabled, false, "and the one that was changed")
+    check.eq(plugin.store:getQueue()[1].body.shelf_type, "complete",
+        "and marks it with the status that was chosen")
+
+    -- Which is what makes the defaults only defaults: this book has answered now.
+    plugin.store:set("auto_progress", false)
+    check.eq(plugin.store:autoProgress(plugin.store:getLink(plugin.ui.doc_settings)), true,
+        "and a later change of default does not reach back into it")
 end
 
 check.section("End of book")
@@ -1056,6 +1172,33 @@ do
     plugin.store:cacheMark(plugin.ui.doc_settings, { shelf_type = "progress", rating_grade = 8 })
     check.eq(labelOf(rows[1]), "Reading ★★★★", "and otherwise the shelf and the rating")
 
+    --[[--
+    Both automatic switches are the book's own, so both live under this book's
+    settings. What is left in the global list is only what a new book starts
+    with, and that is a submenu rather than two more rows among switches that act
+    the moment they are tapped.
+    ]]
+    local book_rows = plugin:linkMenu()
+    local progress_row
+    for _idx, row in ipairs(book_rows) do
+        if row.text == "Update progress automatically" then progress_row = row end
+    end
+    check.ok(progress_row ~= nil, "this book has its own automatic-progress switch")
+    check.eq(progress_row.checked_func(), false, "off, as a new link starts")
+    progress_row.callback()
+    check.eq(plugin.store:getLink(plugin.ui.doc_settings).auto_progress, true,
+        "and tapping it records the answer on the book")
+    check.eq(progress_row.checked_func(), true, "which is what the row then shows")
+
+    local defaults
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == "Defaults for a new book" then defaults = row end
+    end
+    check.ok(defaults ~= nil, "the global list keeps only the defaults")
+    check.eq(#defaults.sub_item_table, 2, "which are the two automatic switches")
+    check.eq(defaults.sub_item_table[1].text, "Update progress automatically")
+    check.eq(defaults.sub_item_table[2].text, "Upload new highlights and notes")
+
     -- The file browser has no book, so it offers only what needs none.
     reset()
     local fm = NeoDB:new{ ui = { menu = { registerToMainMenu = function() end } } }
@@ -1248,12 +1391,9 @@ do
     rows = plugin:shelfMenu()
     check.eq(rows[1].text, "Want to read", "linked, the shelves are the answer")
     check.eq(rows[4].text, "Dropped", "all four of them")
-    -- The quick sheet is opened by holding the status row, and KOReader shows a
-    -- row's help_text on hold only when it has no hold_callback -- so the hint
-    -- cannot live on the gesture, and there is a row for it instead.
-    check.eq(rows[5].text, "Quick actions…", "then a tappable way to the sheet")
-    check.ok(rows[5].help_text:find("gesture", 1, true) ~= nil,
-        "which is where the long press and the gesture are named")
+    -- And only them: a row that was not a status read here as a fifth shelf.
+    check.eq(#rows, 4, "with nothing among them that is not one")
+    check.eq(rows[4].separator, nil, "and no rule drawn under the last, with nothing below it")
 
     -- The same three rows are shared with "Settings for this book", where they
     -- come after everything about the link that already exists.
@@ -1288,7 +1428,7 @@ do
             if id == "neodb" then at = index; seen = seen + 1 end
         end
         check.eq(seen, 1, which .. ": the row is claimed exactly once")
-        check.eq(at, 4, which .. ": as the fourth Tools row, not the last")
+        check.eq(at, 3, which .. ": as the third Tools row, not the last")
     end
 end
 
