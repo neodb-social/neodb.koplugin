@@ -903,6 +903,100 @@ do
         "and a later change of default does not reach back into it")
 end
 
+check.section("Offering a link when a book opens")
+do
+    --[[--
+    The one thing here that speaks before it is spoken to, so most of what is
+    checked is the not-speaking: every reason to stay quiet, and the record that
+    keeps it quiet afterwards.
+    ]]
+    reset()
+    local plugin = newPlugin()
+    plugin.store:set("offer_link_on_open", false)
+    check.eq(Match.offerLink(plugin.ctx), false, "nothing is offered while the option is off")
+    check.eq(plugin.store:linkOffered(plugin.ui.doc_settings), false,
+        "and staying quiet is not the same as having asked")
+
+    reset()
+    plugin = newPlugin{ signed_out = true }
+    check.eq(Match.offerLink(plugin.ctx), false,
+        "nor to a signed-out reader, who would only meet a sign-in wall")
+    check.eq(plugin.store:linkOffered(plugin.ui.doc_settings), false,
+        "and they are asked properly once they have an account")
+
+    -- A linked book is settled, so it is recorded rather than merely skipped:
+    -- unlinking it later must not bring the question back.
+    reset()
+    plugin = newPlugin()
+    linkBook(plugin)
+    check.eq(Match.offerLink(plugin.ctx), false, "a linked book is not offered a link")
+    check.eq(plugin.store:linkOffered(plugin.ui.doc_settings), true, "and the question is closed")
+    Match.unlink(plugin.ctx)
+    Stubs.lastShown("ConfirmBox"):accept()
+    check.eq(plugin.store:getLink(plugin.ui.doc_settings), nil, "unlinking it drops the link")
+    check.eq(Match.offerLink(plugin.ctx), false, "but does not start the question again")
+
+    -- The offer itself.
+    reset()
+    plugin = newPlugin()
+    check.eq(Match.offerLink(plugin.ctx), true, "a book nobody has linked is offered one")
+    local dialog = Stubs.lastShown("ButtonDialog")
+    check.ok(dialog.title:find("“Dune”", 1, true) ~= nil, "the dialog names the book")
+    check.ok(dialog.title:find("Find this book on NeoDB?", 1, true) ~= nil, "and what it is asking")
+    check.ok(dialog.title:find("one time", 1, true) ~= nil, "and says it will not ask again")
+    check.eq(table.concat(dialog:labels(), " | "),
+        "Find book | Not this book | Stop asking",
+        "the one yes on its own row, the two ways of declining together below")
+
+    -- Recorded when it is shown, not when it is answered: a dismissed dialog, or
+    -- a device that dies with it up, must not buy the reader a second one.
+    check.eq(plugin.store:linkOffered(plugin.ui.doc_settings), true,
+        "showing it is what closes the question")
+    check.eq(Match.offerLink(plugin.ctx), false, "so the same book is never offered twice")
+
+    -- Reopening the book reads that record back out of its sidecar.
+    local reopened = newPlugin{ ui = newReaderUI{ sidecar = Stubs.sidecars[BOOK] } }
+    check.eq(Match.offerLink(reopened.ctx), false, "including on a later open of it")
+
+    -- Saying yes is the ordinary find-this-book path, nothing new.
+    reset()
+    plugin = newPlugin()
+    Stubs.respond = function() return 200, {}, '{"data":[]}' end
+    Match.offerLink(plugin.ctx)
+    Stubs.lastShown("ButtonDialog"):press("Find book")
+    check.ok(Stubs.requests[1] ~= nil and Stubs.requests[1].url:find("catalog/search", 1, true) ~= nil,
+        "“Find book” searches NeoDB, the same as the menu row does")
+
+    -- A prompt nobody asked for carries its own way of stopping it.
+    reset()
+    plugin = newPlugin()
+    Match.offerLink(plugin.ctx)
+    Stubs.lastShown("ButtonDialog"):press("Stop asking")
+    check.eq(plugin.store:get("offer_link_on_open"), false, "“Stop asking” turns the option off")
+    check.ok(Stubs.lastNotification():find("NeoDB settings", 1, true) ~= nil,
+        "and says where to turn it back on, a global change being invisible otherwise")
+
+    --[[--
+    Timing. The offer waits for the page to be painted, and gives up rather than
+    waiting for a better moment: a suggestion landing on top of whatever the
+    reader is already doing is an interruption, not an offer.
+    ]]
+    reset()
+    plugin = newPlugin()
+    plugin:onReaderReady()
+    check.eq(UIManager:scheduledCount(plugin.link_offer_task), 1, "opening a book schedules the offer")
+    plugin:onCloseDocument()
+    check.eq(UIManager:scheduledCount(plugin.link_offer_task), 0, "and closing it calls the offer off")
+
+    reset()
+    plugin = newPlugin()
+    UIManager:show({ kind = "InputDialog" }) -- the reader is mid-something
+    plugin:offerLink()
+    check.eq(Stubs.lastShown("ButtonDialog"), nil, "nothing is offered over a dialog")
+    check.eq(plugin.store:linkOffered(plugin.ui.doc_settings), false,
+        "and nothing is recorded, so the next open of the book tries again")
+end
+
 check.section("End of book")
 do
     reset()
@@ -1195,9 +1289,17 @@ do
         if row.text == "Defaults for a new book" then defaults = row end
     end
     check.ok(defaults ~= nil, "the global list keeps only the defaults")
-    check.eq(#defaults.sub_item_table, 2, "which are the two automatic switches")
-    check.eq(defaults.sub_item_table[1].text, "Update progress automatically")
-    check.eq(defaults.sub_item_table[2].text, "Upload new highlights and notes")
+    check.eq(#defaults.sub_item_table, 3, "which are everything about a book NeoDB does not know")
+    -- In the order the three happen in: suggested, then linked, then read.
+    check.eq(defaults.sub_item_table[1].text, "Suggest to link with NeoDB (only once per book)")
+    check.eq(defaults.sub_item_table[2].text, "Update progress automatically")
+    check.eq(defaults.sub_item_table[3].text, "Upload new highlights and notes")
+
+    local suggest = defaults.sub_item_table[1]
+    check.eq(suggest.checked_func(), true, "the offer is on out of the box")
+    suggest.callback()
+    check.eq(suggest.checked_func(), false, "and the row turns it off")
+    suggest.callback()
 
     -- The file browser has no book, so it offers only what needs none.
     reset()

@@ -9,6 +9,7 @@ author search, then to whatever the reader types.
 @module koplugin.neodb.match
 ]]
 
+local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
 local InputDialog = require("ui/widget/inputdialog")
@@ -297,6 +298,96 @@ function Match.autoMatch(ctx, on_done)
         end
         Match.showResults(ctx, data, query, 1, on_done)
     end)
+end
+
+--[[--
+Offers to identify a book the first time it opens.
+
+Returns true when the offer was made, so the caller can tell "asked" from "not
+now" without reading the sidecar back.
+
+Everything about this is shaped by its being uninvited. It happens once per book
+and says so; it carries its own off switch, because a prompt nobody asked for
+with no visible way to stop it is the thing readers uninstall a plugin over; and
+it gives up rather than waiting for a better moment, since a dialog arriving in
+the middle of a page is worse than one that never arrives at all.
+
+@treturn bool whether the dialog was shown
+]]
+function Match.offerLink(ctx)
+    if ctx.store:get("offer_link_on_open") ~= true then return false end
+    -- A prompt that leads straight into a sign-in wall is worse than no prompt.
+    if not ctx.store:isLoggedIn() then return false end
+
+    local doc_settings = ctx.ui.doc_settings
+    if not doc_settings then return false end
+    if ctx.store:linkOffered(doc_settings) then return false end
+
+    --[[--
+    Any link at all, including one this account cannot use: a book linked against
+    another server was linked on purpose, and a bare "find this book?" is not the
+    place to explain what became of it. The shelf menu already says that, to
+    somebody who went looking.
+    ]]
+    local link, foreign = ctx.store:getLink(doc_settings)
+    if link or foreign then
+        -- Recorded even so, so the question is settled for good either way.
+        ctx.store:markLinkOffered(doc_settings)
+        return false
+    end
+
+    local meta = Match.getBookMeta(ctx.ui)
+    local title = meta.title or meta.filename
+    local lines = {}
+    if title and Util.trim(title) ~= "" then
+        table.insert(lines, T(_("“%1”"), Util.ellipsize(title, 50)))
+        table.insert(lines, "")
+    end
+    table.insert(lines, _("Find this book on NeoDB?"))
+    table.insert(lines, "")
+    table.insert(lines, _("Each book gets this question one time."))
+
+    -- Before the dialog rather than after an answer: a dismissal, or the device
+    -- dying while it is up, must not buy the reader a second one.
+    ctx.store:markLinkOffered(doc_settings)
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = table.concat(lines, "\n"),
+        title_align = "center",
+        buttons = {
+            --[[--
+            The one affirmative gets a row to itself; the two ways of declining
+            share the one below. Tapping outside is a third way of declining, and
+            costs nothing, the offer being already recorded.
+            ]]
+            {
+                {
+                    text = _("Find book"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        Match.autoMatch(ctx)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Not this book"),
+                    callback = function() UIManager:close(dialog) end,
+                },
+                {
+                    text = _("Stop asking"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        ctx.store:set("offer_link_on_open", false)
+                        Util.notify(_("You will not be asked again. Turn this back on in the NeoDB settings."))
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    return true
 end
 
 --[[--

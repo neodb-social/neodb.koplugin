@@ -40,6 +40,19 @@ local DEFAULTS = {
     auto_progress           = false,  -- hourly and on close, when the position moved
     auto_upload_annotations = false,  -- mirror this book's highlights and notes
 
+    --[[--
+    Whether opening a book nobody has linked yet offers to link it.
+
+    Grouped with the two above because it is also about a book NeoDB does not
+    know yet, but unlike them it acts by itself, and globally: there is nothing
+    per-book to write it onto until the link it offers exists. What *is* per-book
+    is the record that the offer was made -- see `Store:linkOffered`.
+
+    On by default: a plugin that never mentions the one step everything else
+    needs is a plugin whose menu has to be found first.
+    ]]
+    offer_link_on_open      = true,
+
     --- Crossposting for shared highlights, deliberately separate from
     --- `post_to_fediverse`: a book's worth of quotes is a different proposition
     --- for whoever follows you than the marks and notes you write by hand.
@@ -238,6 +251,37 @@ end
 function Store:clearLink(doc_settings)
     if not doc_settings then return end
     doc_settings:delSetting(LINK_KEY)
+    doc_settings:flush()
+end
+
+--[[--
+Whether this book has already been offered a link when it opened.
+
+Deliberately not cleared by `clearLink`: unlinking a book is a decision, and
+asking about it again the next time it opens would be arguing with it.
+
+In the sidecar rather than in a list of paths held globally, for the same reason
+the link is: it travels with the book, survives a reinstall, and cannot grow
+without bound.
+]]
+local OFFERED_KEY = "neodb_link_offered"
+
+function Store:linkOffered(doc_settings)
+    if not doc_settings then return false end
+    return doc_settings:readSetting(OFFERED_KEY) ~= nil
+end
+
+--[[--
+Records the offer.
+
+Called when the dialog is shown rather than when it is answered, so that a
+dismissal -- or the device dying with the dialog on screen -- cannot produce a
+second one. The timestamp is not read anywhere; it is there because "when" is
+free to keep and impossible to recover later.
+]]
+function Store:markLinkOffered(doc_settings)
+    if not doc_settings then return end
+    doc_settings:saveSetting(OFFERED_KEY, Util.timestamp())
     doc_settings:flush()
 end
 

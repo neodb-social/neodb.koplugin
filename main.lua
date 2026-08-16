@@ -106,6 +106,15 @@ local ANNOTATION_SETTLE_SECONDS = 10
 --- How often "Automatically update progress" looks at where the book stands.
 local PROGRESS_TICK_SECONDS = 3600
 
+--[[--
+How long after a book opens it may offer to link itself.
+
+Long enough for the page to be painted and for the reader to see what they
+opened -- a dialog over a blank screen reads as a failure to open the book --
+and short enough to still belong to the opening rather than to the reading.
+]]
+local LINK_OFFER_SECONDS = 2
+
 function NeoDB:init()
     self.store = Store:new()
     self.api = Api:new{ store = self.store }
@@ -157,6 +166,7 @@ function NeoDB:init()
         -- so rescheduling a new one each time would leave the old ones to fire.
         self.annotation_task = function() self:syncAnnotations() end
         self.progress_task = function() self:progressTick() end
+        self.link_offer_task = function() self:offerLink() end
     end
 
     --[[--
@@ -765,15 +775,25 @@ function NeoDB:settingsMenu()
             sub_item_table = unit_items,
         },
         --[[--
-        A submenu rather than two more rows in this list, because neither of these
-        does anything by itself. They are what the dialog offers when a book is
-        linked, and every answer is written onto that book -- so a row sitting
-        among switches that act immediately would be read as one of them.
+        A submenu rather than three more rows in this list: all of these are about
+        a book NeoDB has not been told about yet, and two of them do nothing by
+        themselves, so a row sitting among switches that act immediately would be
+        read as one of them.
+
+        The offer comes first because that is the order it happens in: a book is
+        suggested, then linked, and only then is there anything for the other two
+        to have been the default for.
         ]]
         {
             text = _("Defaults for a new book"),
-            help_text = _("What the dialog offers when you link a book. Each book then keeps its own switches, under “Settings for this book”."),
+            help_text = _("These apply to a book that NeoDB does not know yet. The last two set what the link dialog offers, and each book then keeps its own answer, under “Settings for this book”."),
             sub_item_table = {
+                {
+                    text = _("Suggest to link with NeoDB (only once per book)"),
+                    help_text = _("When you open a book for the first time, this offers to find it on NeoDB. There is no question when you are signed out, or when the book already has a link."),
+                    checked_func = function() return store:get("offer_link_on_open") end,
+                    callback = function() store:toggle("offer_link_on_open") end,
+                },
                 {
                     text = _("Update progress automatically"),
                     help_text = _("Progress goes out every hour while you read, and when the book is closed, whenever the position moved. It is queued quietly; nothing turns on Wi-Fi."),
@@ -997,9 +1017,29 @@ function NeoDB:onCloseDocument()
     if not self:isReader() then return end
     UIManager:unschedule(self.annotation_task)
     UIManager:unschedule(self.progress_task)
+    UIManager:unschedule(self.link_offer_task)
     Annotations.queueNew(self.ctx)
     Annotations.queueDeletions(self.ctx)
     self:queueProgressIfMoved()
+end
+
+--[[--
+Offers to link the book that has just opened, if it has never been offered one.
+
+One attempt, and no second chance within this open: anything on screen means the
+reader has already moved on to something, and a suggestion arriving on top of it
+would be an interruption rather than an offer. Nothing is recorded in that case,
+so the next time the book opens it tries again.
+
+`Match.offerLink` decides everything else, and records the offer itself.
+]]
+function NeoDB:offerLink()
+    if not self:isReader() then return end
+    if UIManager.getTopmostVisibleWidget
+        and UIManager:getTopmostVisibleWidget() ~= self.ui then
+        return
+    end
+    Match.offerLink(self.ctx)
 end
 
 --[[--
@@ -1077,6 +1117,11 @@ function NeoDB:onReaderReady()
     -- the tick checks -- so flipping it mid-book needs no replumbing.
     if self.progress_task then
         UIManager:scheduleIn(PROGRESS_TICK_SECONDS, self.progress_task)
+    end
+
+    -- The one thing here that talks to the reader, so it waits for the page.
+    if self.link_offer_task then
+        UIManager:scheduleIn(LINK_OFFER_SECONDS, self.link_offer_task)
     end
 
     if self.store:queueCount() == 0 then return end
