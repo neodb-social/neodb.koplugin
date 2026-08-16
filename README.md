@@ -37,9 +37,7 @@ named folder, so there is nothing to rename.
 | Android | `koreader/plugins/` under internal storage |
 | Desktop | `koreader/plugins/` next to the program |
 
-Restart KOReader. The plugin appears under **☰ → Tools → NeoDB**. For one-gesture
-access, bind **NeoDB: book actions** in *Settings → Taps and gestures → Gesture
-manager*.
+Restart KOReader after install. The plugin appears under **☰ → Tools → NeoDB**. 
 
 ## Signing in NeoDB
 
@@ -57,18 +55,17 @@ Tap **☰ → Tools → NeoDB → Sign in to NeoDB…** and pick one of these.
 
 Once signed in, the first time you open a book, the plugin offers to match an
 entry in the server catalogue. You can also match it yourself from either 
-**NeoDB → Find this book on NeoDB…**, which searches by ISBN / title + author, 
+**NeoDB → Find this book on NeoDB…**, which searches by ISBN / title + author; 
 or from **Link by URL…**, which takes a link from NeoDB, Goodreads, Google Books, 
 Open Library or Douban.
 
-Linking ends in one dialog asking for the book's status and whether it should
-send progress and highlights on its own. Your answers are kept per book and can
-be changed later under **Settings for this book**.
+After linking, you may choose whether to send progress and highlights
+automatically. Your choice are kept per book and can be changed later under
+**Settings for this book**.
 
 ## What you can do once linked
 
-Everything is on the **NeoDB** menu, or on the book-actions sheet if you bound it
-to a gesture.
+Most features are under the **☰ → Tools → NeoDB** menu:
 
 - **Read Status**: set to Want to read, Reading, Finished, Dropped.
 - **Update progress** sends where you are now.
@@ -89,6 +86,9 @@ To upload highlights automatically, turn on
 To upload highlights manually, use **NeoDB → Upload all highlights and notes…**.
 
 To upload highlights for many books at once, use **☰ → Tools → Export highlights**.
+
+to have one-gesture access, bind **NeoDB: book actions** in 
+**Settings → Taps and gestures → Gesture manager**.
 
 ## Working offline
 

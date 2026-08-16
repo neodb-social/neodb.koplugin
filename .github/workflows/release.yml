@@ -14,8 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The zip holds what KOReader loads and nothing else: the Lua modules and
-      # the licence they are under. No README, no screenshots, no tests.
+      # The zip holds what KOReader loads, the licence it is under, and the
+      # README so the plugin explains itself where it is installed. The images
+      # the README links to stay behind, and so do the tests.
       #
       # It is built with the plugin directory inside it, already correctly named,
       # so unzipping into KOReader's plugins directory is the whole install.
@@ -23,7 +24,7 @@ jobs:
         run: |
           set -eu
           mkdir -p dist/neodb.koplugin
-          cp LICENSE _meta.lua main.lua neodb_*.lua dist/neodb.koplugin/
+          cp LICENSE README.md _meta.lua main.lua neodb_*.lua dist/neodb.koplugin/
 
           # Guard against a module added under a name the copy above does not
           # match: a plugin shipped without one of its files fails at load.
