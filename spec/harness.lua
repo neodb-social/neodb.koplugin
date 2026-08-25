@@ -19,6 +19,7 @@ local NeoDB = require("main")
 local Actions = require("neodb_actions")
 local Annotations = require("neodb_annotations")
 local Api = require("neodb_api")
+local Login = require("neodb_login")
 local Match = require("neodb_match")
 local Store = require("neodb_store")
 local Util = require("neodb_util")
@@ -177,6 +178,14 @@ do
     check.eq(Util.findISBN("9780441013590"), nil, "a bad checksum is refused")
     check.eq(Util.absoluteUrl(INSTANCE, "/book/x"), INSTANCE .. "/book/x",
         "a catalog path is resolved against the instance")
+
+    -- luajson decodes null to a sentinel function; scrubbed out of an array, the
+    -- hole it leaves would end an ipairs walk early.
+    local list = Util.scrubNulls({ "a", function() end, "b" })
+    check.eq(#list, 2, "a scrubbed null inside an array does not leave a hole")
+    check.eq(list[2], "b", "the values behind it close up in order")
+    local nested = Util.scrubNulls({ tags = { function() end, "kept" } })
+    check.eq(nested.tags[1], "kept", "however deep the array sits")
 end
 
 -- Store -------------------------------------------------------------------------
@@ -1137,6 +1146,55 @@ do
     check.eq(stopped, "rate_limited", "with the reason passed back")
 end
 
+check.section("A flush keeps order within one book")
+do
+    --[[--
+    Progress cannot land before the mark it hangs off. Skipping past a mark the
+    server choked on and running its progress op anyway would meet a refusal
+    that looks permanent, and drop an op that was only ever early.
+    ]]
+    reset()
+    local store = Store:new()
+    store:setInstance(INSTANCE)
+    store:setToken("t")
+    local api = Api:new{ store = store }
+    store:enqueue({ method = "POST", path = "/api/me/shelf/item/x", label = "mark x" })
+    store:enqueue({ method = "POST", path = "/api/me/shelf/item/x/progress", label = "progress x" })
+    store:enqueue({ method = "POST", path = "/api/me/shelf/item/y", label = "mark y" })
+
+    local calls = recordCalls(api, function(_nth, path)
+        if path == "/api/me/shelf/item/x" then return false, "server_error", 500 end
+        return true, {}, 200
+    end)
+    local sent, remaining, dropped = api:flushQueue()
+    check.eq(#calls, 2, "an op behind a kept one is not attempted")
+    check.eq(sent, 1, "while other books still get their turn")
+    check.eq(remaining, 2, "both of the troubled book's ops wait")
+    check.eq(dropped, 0, "and neither is dropped for running before the other")
+
+    local queue = store:getQueue()
+    check.eq(queue[1].label, "mark x", "still in order: the mark first")
+    check.eq(queue[2].label, "progress x", "and its progress behind it")
+
+    -- A note delete names the note, not the item, and depends on nothing still
+    -- queued -- so one the server chokes on must not hold another book's.
+    reset()
+    store = Store:new()
+    store:setInstance(INSTANCE)
+    store:setToken("t")
+    api = Api:new{ store = store }
+    store:enqueue({ method = "DELETE", path = "/api/me/note/n1", label = "delete n1" })
+    store:enqueue({ method = "DELETE", path = "/api/me/note/n2", label = "delete n2" })
+    calls = recordCalls(api, function(_nth, path)
+        if path == "/api/me/note/n1" then return false, "server_error", 500 end
+        return true, {}, 200
+    end)
+    sent, remaining = api:flushQueue()
+    check.eq(#calls, 2, "a note delete the server choked on holds no other note's")
+    check.eq(sent, 1, "so the unrelated one still goes out")
+    check.eq(remaining, 1, "while the troubled one waits alone")
+end
+
 check.section("Submitting one write")
 do
     reset()
@@ -1173,6 +1231,89 @@ do
     status = api:submit({ method = "POST", path = "/a", label = "a" }, true)
     check.eq(status, "sent", "a write made online goes straight out")
     check.eq(seen[1].data.uuid, "note-1", "and its reply is announced, uuid and all")
+end
+
+check.section("The queue belongs to the account that filled it")
+do
+    --[[--
+    A queued op posts as whoever is signed in when the queue drains. Right for a
+    paused queue waiting for its own reader to sign in again; wrong for anyone
+    else, whose name must not go on the previous reader's marks and notes.
+    ]]
+    reset()
+    local plugin = newPlugin()
+    plugin.store:setAccount("token-1", { username = "bob" })
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "bob's mark" })
+
+    recordCalls(plugin.api, function() return true, { username = "bob" }, 200 end)
+    Login.verifyAndSave(plugin.ctx, "token-2", nil)
+    check.eq(plugin.store:queueCount(), 1,
+        "signing in again as the same account keeps what is waiting")
+
+    recordCalls(plugin.api, function() return true, { username = "alice" }, 200 end)
+    Login.verifyAndSave(plugin.ctx, "token-3", nil)
+    check.eq(plugin.store:queueCount(), 0,
+        "signing in as someone else does not inherit the previous reader's ops")
+    check.ok((Stubs.alerts[#Stubs.alerts - 1] or ""):find("Discarded", 1, true) ~= nil,
+        "and says so, since queued work is being thrown away")
+
+    -- The same name on another server is another account.
+    reset()
+    plugin = newPlugin()
+    plugin.store:setAccount("token-1", { username = "bob" })
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "for the old server" })
+    Login.setInstance(plugin.ctx, "https://other.example")
+    recordCalls(plugin.api, function() return true, { username = "bob" }, 200 end)
+    Login.verifyAndSave(plugin.ctx, "token-9", nil)
+    check.eq(plugin.store:queueCount(), 0,
+        "a queue for one server is not flushed against another")
+
+    -- A queue from before ownership was recorded: no way to know whose it is.
+    reset()
+    plugin = newPlugin()
+    plugin.store:replaceQueue({ { method = "POST", path = "/a", label = "old op" } })
+    recordCalls(plugin.api, function() return true, { username = "carol" }, 200 end)
+    Login.verifyAndSave(plugin.ctx, "token-4", nil)
+    check.eq(plugin.store:queueCount(), 1,
+        "a queue from before ownership was recorded flushes as it always has")
+
+    -- An enqueue with nobody identifiable signed in must not erase a known
+    -- owner: a nil stamp reads as "predates ownership" and hands the queue
+    -- to whoever signs in next.
+    reset()
+    plugin = newPlugin()
+    plugin.store:setAccount("token-1", { username = "bob" })
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "bob's mark" })
+    plugin.store.settings:saveSetting("username", nil) -- identity gone, token kept
+    plugin.store:enqueue({ method = "POST", path = "/b", label = "nobody's op" })
+    recordCalls(plugin.api, function() return true, { username = "alice" }, 200 end)
+    Login.verifyAndSave(plugin.ctx, "token-5", nil)
+    check.eq(plugin.store:queueCount(), 0,
+        "so bob's stamp outlives an ownerless enqueue, and alice inherits nothing")
+end
+
+check.section("A pairing answer is checked before it is adopted")
+do
+    reset()
+    local plugin = newPlugin{ signed_out = true }
+    plugin.api.portalClaim = function()
+        return true, { access_token = "t2", instance = "neodb.social/users/me/" }, 200
+    end
+    recordCalls(plugin.api, function() return true, { username = "alice" }, 200 end)
+    Login.claimPairing(plugin.ctx, "https://p.neodb.net", { code = "c", fetch_token = "f" })
+    check.eq(plugin.store:getInstance(), "https://neodb.social",
+        "the server the portal names is normalized like a typed one")
+    check.eq(plugin.store:getToken(), "t2", "and the sign-in completes against it")
+
+    reset()
+    plugin = newPlugin{ signed_out = true }
+    plugin.api.portalClaim = function()
+        return true, { access_token = "t2", instance = "nonsense" }, 200
+    end
+    Login.claimPairing(plugin.ctx, "https://p.neodb.net", { code = "c", fetch_token = "f" })
+    check.ok((Stubs.lastAlert() or ""):find("usable sign-in", 1, true) ~= nil,
+        "an address that cannot be a server refuses the sign-in")
+    check.eq(plugin.store:getInstance(), nil, "and nothing is adopted")
 end
 
 -- Errors -------------------------------------------------------------------------------
@@ -1433,6 +1574,79 @@ do
     check.eq(switched:label("unit"), "Unit: percent", "the button agrees")
     check.eq(switched.typed, "25", "and so does the box")
     check.eq(switched.input_type, "number", "which now wants a number pad")
+end
+
+check.section("The progress dialog refuses a value the server would")
+do
+    --[[--
+    Checked at the dialog, because a bad value typed offline would only meet its
+    refusal days later, in the background, and be given up on.
+    ]]
+    reset()
+    local plugin = newPlugin{ page = 100, pages = 400, percent = 0.25 }
+    linkBook(plugin, { mark = { shelf_type = "progress" }, mark_checked = "2026-08-01 00:00:00" })
+    Stubs.online = false
+    Actions.updateProgress(plugin.ctx)
+    local dialog = Stubs.lastShown("InputDialog")
+
+    dialog:typeText("250")
+    dialog:press("Send")
+    check.ok((Stubs.lastAlert() or ""):find("between 0 and 100", 1, true) ~= nil,
+        "a percentage over 100 is refused")
+    check.eq(plugin.store:queueCount(), 0, "and nothing is queued")
+    check.ok(dialog.closed ~= true, "with the dialog left open to fix it")
+
+    dialog:typeText("abc")
+    dialog:press("Send")
+    check.eq(plugin.store:queueCount(), 0, "words are not a percentage either")
+
+    dialog:typeText("25.4")
+    dialog:press("Send")
+    check.eq(plugin.store:getQueue()[1].body.value, "25",
+        "a decimal is rounded to the whole percent the book shows")
+
+    -- Numbered pages: the count is known, so a page past it is a typo.
+    reset()
+    plugin = newPlugin{ paging = true, page = 100, pages = 400 }
+    linkBook(plugin, { mark = { shelf_type = "progress" }, mark_checked = "2026-08-01 00:00:00" })
+    Stubs.online = false
+    Actions.updateProgress(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText("1000")
+    dialog:press("Send")
+    check.ok((Stubs.lastAlert() or ""):find("400 pages", 1, true) ~= nil,
+        "a page past the end of the book is refused")
+    dialog:typeText("12.5")
+    dialog:press("Send")
+    check.eq(plugin.store:queueCount(), 0, "and half a page is not a page")
+    dialog:typeText("007")
+    dialog:press("Send")
+    check.eq(plugin.store:getQueue()[1].body.value, "7", "a valid page is sent as a number")
+
+    -- Named pages ("xii"): there is nothing to check a label against.
+    reset()
+    plugin = newPlugin{ page = 100, pages = 400, percent = 0.25, labels = "xii" }
+    linkBook(plugin, { mark = { shelf_type = "progress" }, mark_checked = "2026-08-01 00:00:00" })
+    Stubs.online = false
+    Actions.updateProgress(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText("xv")
+    dialog:press("Send")
+    check.eq(plugin.store:getQueue()[1].body.value, "xv",
+        "a publisher page label goes out as typed")
+
+    -- Most page-map labels are digits; sitting on one must not make the dialog
+    -- refuse the roman-numeral label the reader actually types.
+    reset()
+    plugin = newPlugin{ page = 100, pages = 400, percent = 0.25, labels = "245" }
+    linkBook(plugin, { mark = { shelf_type = "progress" }, mark_checked = "2026-08-01 00:00:00" })
+    Stubs.online = false
+    Actions.updateProgress(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText("xv")
+    dialog:press("Send")
+    check.eq(plugin.store:getQueue()[1].body.value, "xv",
+        "a label book on a numeric label still takes whatever is typed")
 end
 
 check.section("Uploading a backlog bigger than the queue")

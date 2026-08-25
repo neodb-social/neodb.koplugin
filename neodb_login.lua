@@ -79,6 +79,20 @@ function Login.verifyAndSave(ctx, token, grant, on_success)
 
     ctx.store:setAccount(token, data)
     ctx.store:setGrant(grant)
+
+    --[[--
+    Settle the queue before anything can drain it. Ops still waiting from before
+    this sign-in belong to whoever made them: for the same account signing in
+    again -- the "uploads paused" recovery -- they are exactly what should now go
+    out, but for anyone else they must not, or the next flush posts the previous
+    reader's marks and notes under this account's name.
+    ]]
+    local dropped = ctx.store:dropQueueFromOtherAccount()
+    if dropped > 0 then
+        Util.alert(T(_("Discarded %1 pending upload(s) that belonged to the previous account."),
+            dropped))
+    end
+
     Util.alert(T(_("Signed in to NeoDB as %1."), ctx.store:getAccountLabel()))
     if on_success then on_success() end
     return true
@@ -365,16 +379,20 @@ function Login.claimPairing(ctx, portal, session, on_done)
             return
         end
 
-        if not data.access_token or not data.instance then
+        -- The portal is a third party, so the address it names goes through the
+        -- same normalization a hand-typed one does -- a stray path or trailing
+        -- slash would otherwise end up in every URL built from here on.
+        local instance = Util.normalizeInstance(data.instance)
+        if not data.access_token or not instance then
             Util.alert(_("The pairing service did not return a usable sign-in."))
             return
         end
 
         -- The instance was chosen on the phone, so adopt it before checking the
         -- token: everything else reads the server address from the store.
-        if ctx.store:getInstance() ~= data.instance then
+        if ctx.store:getInstance() ~= instance then
             ctx.store:logout()
-            ctx.store:setInstance(data.instance)
+            ctx.store:setInstance(instance)
         end
 
         -- The portal registered the app on our behalf and hands the credentials
@@ -382,7 +400,7 @@ function Login.claimPairing(ctx, portal, session, on_done)
         -- against the same server later would register a second app for the
         -- same device.
         if data.client_id and data.client_secret then
-            ctx.store:setClient(data.instance, data.client_id, data.client_secret)
+            ctx.store:setClient(instance, data.client_id, data.client_secret)
         end
 
         Login.verifyAndSave(ctx, data.access_token, {

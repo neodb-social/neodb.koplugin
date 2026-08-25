@@ -177,6 +177,19 @@ function Store:getAccountLabel()
     return "@" .. name .. "@" .. host
 end
 
+--[[--
+What identifies the signed-in account, as one comparable string, or nil when
+there is no whole identity to name.
+
+A username alone is not enough: the same name on two instances is two people.
+]]
+function Store:accountKey()
+    local instance = self:getInstance()
+    local username = self.settings:readSetting("username")
+    if not instance or not username then return nil end
+    return instance .. " " .. username
+end
+
 --- OAuth client credentials, kept per instance so switching hosts re-registers.
 function Store:getClient(instance)
     local clients = self.settings:readSetting("oauth_clients", {})
@@ -408,6 +421,13 @@ function Store:enqueue(op)
         end
         table.insert(queue, op)
     end
+    -- Stamped so a later sign-in can tell whose ops these are; see
+    -- `dropQueueFromOtherAccount`. Same account for every op until a sign-in
+    -- changes it, and that sign-in settles the queue first. An unknowable
+    -- identity (logged out: no username) must not overwrite a known owner --
+    -- a nil stamp reads as "predates ownership" and hands the queue to anyone.
+    local owner = self:accountKey()
+    if owner then self.settings:saveSetting("queue_owner", owner) end
     self.settings:flush()
     return true
 end
@@ -446,8 +466,38 @@ function Store:enqueueAll(ops)
             break
         end
     end
-    if accepted > 0 then self.settings:flush() end
+    if accepted > 0 then
+        -- Same nil guard as `enqueue`: never launder a known owner away.
+        local owner = self:accountKey()
+        if owner then self.settings:saveSetting("queue_owner", owner) end
+        self.settings:flush()
+    end
     return accepted
+end
+
+--[[--
+Discards a queue that was filled under a different account.
+
+A queued op carries no account of its own -- whoever is signed in when the queue
+drains is who it posts as. That is exactly right for the one recovery path that
+needs it, a paused queue waiting for its own reader to sign in again, and exactly
+wrong for everyone else: signing in as a different user, or on a different
+server, must not publish the previous reader's marks and notes under the new
+name. Called from the one place every successful sign-in passes through.
+
+A queue with no owner recorded predates the stamp, and there is no way to know
+whose it is; it is kept, which is what every version before this one did.
+
+@treturn int how many ops were discarded
+]]
+function Store:dropQueueFromOtherAccount()
+    local count = self:queueCount()
+    if count == 0 then return 0 end
+    local owner = self.settings:readSetting("queue_owner")
+    if owner == nil or owner == self:accountKey() then return 0 end
+    logger.warn("NeoDB: discarding", count, "queued op(s) made under another account")
+    self:clearQueue()
+    return count
 end
 
 --[[--
@@ -507,6 +557,7 @@ afterwards would be describing a queue that no longer exists.
 ]]
 function Store:clearQueue()
     self:replaceQueue({})
+    self.settings:saveSetting("queue_owner", nil)
     self:set("last_flush", nil)
 end
 

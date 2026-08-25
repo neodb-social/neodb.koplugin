@@ -32,13 +32,34 @@ function Util.scrubNulls(value, depth)
     if type(value) ~= "table" then return value end
     depth = (depth or 0) + 1
     if depth > 16 then return value end -- paranoia: bail out on pathological nesting
+    local last_index, holed = 0, false
     for k, v in pairs(value) do
+        if type(k) == "number" and k > last_index then last_index = k end
         local value_type = type(v)
         if value_type == "function" or value_type == "userdata" then
             value[k] = nil
+            if type(k) == "number" then holed = true end
         elseif value_type == "table" then
             Util.scrubNulls(v, depth)
         end
+    end
+    --[[--
+    A null *inside* an array leaves a hole once it is scrubbed, and `ipairs`
+    stops at a hole -- so `["a", null, "b"]` would silently lose "b" for every
+    caller that walks the list, and a mark resend would then drop the tags after
+    it. Closed up in place, keeping the order. JSON never mixes keys, so numeric
+    keys here always mean the array part.
+    ]]
+    if holed then
+        local write = 0
+        for read = 1, last_index do
+            local kept = value[read]
+            if kept ~= nil then
+                write = write + 1
+                value[write] = kept
+            end
+        end
+        for i = write + 1, last_index do value[i] = nil end
     end
     return value
 end
@@ -272,7 +293,8 @@ Turns whatever the user typed into "https://host", or nil if it is unusable.
 Accepts "neodb.social", "https://neodb.social/", "https://neodb.social/users/me/".
 ]]
 function Util.normalizeInstance(input)
-    local host = Util.trim(input or "")
+    if type(input) ~= "string" then return nil end -- the portal is a third party
+    local host = Util.trim(input)
     if host == "" then return nil end
     host = host:gsub("^%a+://", "")
     host = host:gsub("/.*$", "") -- drop any path that got pasted along

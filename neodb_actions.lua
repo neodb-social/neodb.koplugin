@@ -772,6 +772,38 @@ function Actions.updateProgress(ctx, on_done)
                             callback = function()
                                 local entered = Util.trim(dialog:getInputText())
                                 if entered == "" then return end
+                                --[[--
+                                Checked here rather than left to the server: a bad
+                                value typed offline would meet its refusal days
+                                later, in the background, and be given up on. Books
+                                whose pages are named rather than numbered ("xii")
+                                take whatever is typed -- there is nothing to check
+                                a label against.
+                                ]]
+                                if progress_type == "percentage" then
+                                    local number = tonumber(entered)
+                                    if not number or number < 0 or number > 100 then
+                                        Util.alert(_("Enter a percentage between 0 and 100."))
+                                        return
+                                    end
+                                    entered = tostring(math.floor(number + 0.5))
+                                elseif total then
+                                    -- This book's pages are numbers -- a label
+                                    -- book reports no total (`inPreferredUnit`),
+                                    -- and gets no check even when the reader
+                                    -- happens to sit on a numeric label.
+                                    local number = tonumber(entered)
+                                    if not number or number < 1 or number % 1 ~= 0 then
+                                        Util.alert(_("Enter a page number."))
+                                        return
+                                    end
+                                    if total and number > total then
+                                        Util.alert(T(_("This book has %1 pages."),
+                                            tostring(total)))
+                                        return
+                                    end
+                                    entered = tostring(number)
+                                end
                                 UIManager:close(dialog)
                                 Actions.sendProgressForBook(
                                     ctx, link, progress_type, entered, false, on_done)

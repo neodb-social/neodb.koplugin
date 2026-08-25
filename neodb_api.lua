@@ -575,16 +575,33 @@ function Api:flushQueue()
 
     local remaining, sent, dropped = {}, 0, 0
     local stopped
+    --[[--
+    Items whose op was kept for a later attempt. Order matters between ops for
+    one item -- progress cannot land before the mark it hangs off, which is why
+    `supersede` keeps slots instead of re-appending -- so once one of an item's
+    ops is being kept, the ones behind it wait with it. Running them early would
+    meet a refusal that looks permanent, and be dropped for an op that was only
+    ever early.
+    ]]
+    local held_items = {}
     for _idx, op in ipairs(queue) do
-        if stopped then
+        -- Only item-scoped ops hold hands; a note delete names the note, not the
+        -- item, and depends on nothing still queued. (`uuidFromPath` would map
+        -- every note delete to the same key and group unrelated books.)
+        local item = type(op.path) == "string" and op.path:match("/item/([^/]+)") or nil
+        if stopped or (item and held_items[item]) then
             -- Kept in order, so the next attempt resumes exactly here.
             table.insert(remaining, op)
         else
             local ok, data, _code, moved_to = self:call(op.method, op.path, { json = op.body })
-            -- Follow the item to wherever it was merged, so an op queued against a
-            -- uuid that has since been merged away is delivered instead of discarded.
-            if moved_to then op.path = moved_to end
             if ok then
+                -- Follow the item to wherever it was merged, so the announcement
+                -- names where it landed. A *kept* op keeps the path it was queued
+                -- with instead: its dependents behind it still name the old uuid,
+                -- and rewriting only the front op would split them onto different
+                -- hold keys on the next flush. The retry just re-follows the
+                -- redirect.
+                if moved_to then op.path = moved_to end
                 self:announceSent(op, data)
                 sent = sent + 1
             elseif STOP_FLUSH[data] then
@@ -593,8 +610,9 @@ function Api:flushQueue()
                 table.insert(remaining, op)
             elseif data == "server_error" then
                 -- One item the server choked on. Cheap to skip past, since it
-                -- answered rather than hung, so the rest still get their turn.
+                -- answered rather than hung, so *other* items still get their turn.
                 table.insert(remaining, op)
+                if item then held_items[item] = true end
             else
                 -- Keeping these forever would block the queue behind an op that can
                 -- never succeed (deleted item, item merged away, malformed body).

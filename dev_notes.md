@@ -46,6 +46,12 @@ A book not yet marked goes onto **Reading** when progress is sent, which is what
 sending it means. A book already marked, Finished and Dropped included, is left
 where it was put.
 
+The progress dialog refuses a percentage outside 0–100 and a page past the
+book's count, at the dialog rather than at the server: a bad value typed offline
+would only meet its refusal days later, in the background. Books with publisher
+page labels ("xii") take whatever is typed, there being nothing to check a label
+against.
+
 **Update progress automatically** is a per-book switch. It reports every hour
 while the book is open and once when it closes, whenever the position moved, and
 only queues.
@@ -85,11 +91,19 @@ and colour filters.
   kept.
 - An upload that can never succeed, such as one for a deleted entry, is discarded
   rather than blocking what is behind it.
+- When the server chokes on one upload (a 5xx), that op is kept — and the ops
+  behind it *for the same book* wait with it, so a progress update never runs
+  ahead of the mark it depends on. Other books' uploads still get their turn.
 - Uploading stops instead when the trouble is the connection or the account, such
   as a refused sign-in or a rate limit. Everything waits in order and the
   **Uploads** row says why.
 - The queue holds 100. When full it refuses new uploads rather than dropping
   waiting ones, so nothing already recorded is lost.
+- The queue posts as whoever is signed in, so it remembers whose ops it holds.
+  Signing in again as the same account keeps them — that is the recovery path for
+  a paused queue — while a sign-in that turns out to be a different account, or a
+  different server, discards them and says so, rather than publishing the
+  previous reader's marks and notes under the new name.
 
 ### Known limits
 
