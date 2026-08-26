@@ -39,6 +39,10 @@ named folder, so there is nothing to rename.
 
 Restart KOReader after install. The plugin appears under **☰ → Tools → NeoDB**. 
 
+To see which version you have, tap **☰ → Tools → NeoDB → Settings → About this
+plugin**. A copy built from the source rather than installed from a release
+reports `dev`.
+
 ## Signing in NeoDB
 
 Tap **☰ → Tools → NeoDB → Sign in to NeoDB…** and pick one of these.

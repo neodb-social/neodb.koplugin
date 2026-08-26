@@ -883,13 +883,21 @@ function NeoDB:settingsMenu()
         {
             text = _("About this plugin"),
             keep_menu_open = true,
+            --[[--
+            `self.version` comes from `_meta.lua`, which KOReader merges onto the
+            plugin module before the instance is built. A build made from a
+            checkout, and the spec harness, have no merge and no version, so the
+            fallback is what they show.
+            ]]
             callback = function()
                 Util.alert(T(_([[NeoDB for KOReader
 
-Instance: %1
-Account: %2
+Version: %1
+Instance: %2
+Account: %3
 
 Marks, notes and progresses are saved to your NeoDB account. Anything made while offline is queued and uploaded next time you are online.]]),
+                    self.version or "dev",
                     Util.instanceHost(store:getInstance() or "") ~= "" and Util.instanceHost(store:getInstance()) or _("not set"),
                     store:getAccountLabel() or _("not signed in")))
             end,

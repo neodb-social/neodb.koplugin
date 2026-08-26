@@ -188,6 +188,30 @@ named `neodb.koplugin/` folder. The file list is diffed against the repository's
 tracked modules first, because the copy is a glob and a plugin shipped without
 one of its files fails at load.
 
+## Which build an installed plugin says it is
+
+`_meta.lua` carries `version`, and is the only place it is written. KOReader's
+`PluginLoader:_load` merges every key in that file onto the plugin module, which
+the instance inherits from, so `self.version` is what the plugin's own **About
+this plugin** row reports. KOReader itself neither reads nor shows the field.
+
+A checkout says `dev`. The release workflow stamps the tag over that line in its
+own copy of the file, and the exact spelling of the line is therefore a contract:
+
+- it refuses to build when it cannot find the line, so a reworded `_meta.lua`
+  cannot ship as `dev` instead;
+- the harness checks the same line, so a rewording fails at pull-request time and
+  not at release time;
+- a tag holding anything outside `A-Za-z0-9._+/~-` is refused. The version ends
+  up inside a Lua string in a source file, so a backslash or a quotation mark
+  would not ship a wrong version, it would ship a plugin that cannot load. Both
+  are legal in a git tag.
+- a manual run has no tag and stamps `dev-<short sha>`.
+
+The version is read through `self.version or "dev"`, and the fallback is not
+decorative: the harness builds `NeoDB:new{}` with no merge behind it, and so does
+a plugin folder copied straight out of a checkout.
+
 ## Two traps worth knowing before editing
 
 **luajson**, which KOReader bundles, has two behaviours that both bit this plugin

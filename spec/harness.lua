@@ -1748,6 +1748,56 @@ do
     end
 end
 
+--[[--
+The build's own version.
+
+`_meta.lua` is the one place it is written, because KOReader merges every key
+there onto the plugin module before the instance is built. The release workflow
+stamps the tag over that line in its own copy of the file, and refuses to build
+when it cannot find it -- so the exact spelling of the line is a contract, and is
+checked here rather than at release time, where a rewording would already be too
+late.
+]]
+check.section("The version this build says it is")
+do
+    -- run.sh works from spec/, but the harness should still run from the root.
+    local source, meta
+    for _idx, path in ipairs({ "../_meta.lua", "_meta.lua" }) do
+        local handle = io.open(path, "r")
+        if handle then
+            source = handle:read("*a")
+            handle:close()
+            meta = dofile(path)
+            break
+        end
+    end
+
+    check.ok(source ~= nil, "_meta.lua is where the harness expects it")
+    check.ok(source and source:find('\n    version = "dev",\n', 1, true) ~= nil,
+        "and holds the line the release workflow stamps the tag over, spelled exactly so")
+    check.eq(meta and meta.version, "dev", "which is what a checkout reports being")
+
+    reset()
+    local plugin = newPlugin()
+    local about
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == "About this plugin" then about = row end
+    end
+    check.ok(about ~= nil, "the settings list has a row that says what this build is")
+
+    -- What the merge leaves behind, on a plugin KOReader really loaded.
+    plugin.version = "9.9.9"
+    about.callback()
+    check.ok((Stubs.lastAlert() or ""):find("Version: 9.9.9", 1, true) ~= nil,
+        "and the row reports the version the build was stamped with")
+
+    -- No merge, so nothing to report: a checkout, and the harness itself.
+    plugin.version = nil
+    about.callback()
+    check.ok((Stubs.lastAlert() or ""):find("Version: dev", 1, true) ~= nil,
+        "while a build with none says so rather than leaving the line blank")
+end
+
 check.section("The export target is registered at load")
 do
     check.ok(Stubs.providers.exporter ~= nil and Stubs.providers.exporter.NeoDB ~= nil,

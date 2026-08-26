@@ -21,6 +21,10 @@ jobs:
       # It is built with the plugin directory inside it, already correctly named,
       # so unzipping into KOReader's plugins directory is the whole install.
       - name: Build the plugin zip
+        # Through the environment rather than inline, so no tag name can end up
+        # being read as part of the script.
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -eu
           mkdir -p dist/neodb.koplugin
@@ -34,6 +38,46 @@ jobs:
             echo "the zip does not match the modules in the repository" >&2
             exit 1
           fi
+
+          # Stamp the release tag into the copy, so an installed plugin can say
+          # which build it is. A manual run has no tag, and says so instead.
+          #
+          # awk rather than sed because the tag is data: sed would read a "&" in
+          # it as part of the replacement, and the delimiter has to dodge
+          # whatever else a tag may hold. Reading it from the environment leaves
+          # nothing to interpret.
+          #
+          # Refusing when the line is not found is the point of the exercise. A
+          # reworded _meta.lua would otherwise ship as "dev", and nobody would
+          # find out until a reader was asked which version they had.
+          VERSION="$RELEASE_TAG"
+          if [ -z "$VERSION" ]; then
+            VERSION="dev-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+
+          # The version becomes a Lua string in a source file, so a backslash or
+          # a quotation mark in it would not stamp a wrong version: it would ship
+          # a plugin that cannot be loaded at all. Both are legal in a git tag,
+          # so refuse here rather than find out on a device.
+          case "$VERSION" in
+            *[!A-Za-z0-9._+/~-]*)
+              echo "the tag \"$VERSION\" holds a character a version string cannot carry" >&2
+              exit 1 ;;
+          esac
+          if ! VERSION="$VERSION" awk '
+              $0 == "    version = \"dev\"," {
+                  print "    version = \"" ENVIRON["VERSION"] "\","
+                  stamped = 1
+                  next
+              }
+              { print }
+              END { if (!stamped) exit 1 }
+          ' dist/neodb.koplugin/_meta.lua > /tmp/stamped_meta.lua; then
+            echo "_meta.lua has no 'version = \"dev\",' line to stamp the tag over" >&2
+            exit 1
+          fi
+          mv /tmp/stamped_meta.lua dist/neodb.koplugin/_meta.lua
+          grep -n "version" dist/neodb.koplugin/_meta.lua
 
           (cd dist && zip -r ../neodb.koplugin.zip neodb.koplugin)
           unzip -l neodb.koplugin.zip
