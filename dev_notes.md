@@ -87,6 +87,31 @@ and colour filters.
 
 ### The queue
 
+- **The queue empties itself when the device connects**, with no radio raised, no
+  message, and nothing that polls. KOReader broadcasts `NetworkConnected`;
+  `main.lua` handles it and hands the queue to `Actions.flushSoon`. A device that
+  stays offline for a week therefore costs nothing at all, and a reader who turns
+  Wi-Fi on for some other reason gets their backlog sent behind it. The older
+  triggers — a book opening, the hourly progress tick, the end of a book, an
+  annotation sync, an export — still fire; they are now the fallback rather than
+  the only route.
+- **A failed flush retries three times, at 8 s, 24 s and 72 s, then stops.** Each
+  fresh occasion (any of the triggers above) resets that budget; only a failed
+  attempt books the next one. Nothing retries forever, because nothing here is
+  urgent enough to be worth a radio that never sleeps.
+- **`NetworkConnected` arrives before DNS works.** It fires on the link being up,
+  several seconds before a hostname resolves, so the event on its own would be
+  eaten by the reachability check. This is what the retry above is mainly for,
+  and why `Util` separates `isWifiOn` (cheap, and the radio will not come on by
+  itself, so a timer against it is battery for nothing) from `isOnline` (a real
+  DNS round trip, so never poll it).
+- Nothing on this path notifies, shows a busy box, or prompts for Wi-Fi. The one
+  exception is the "sign in again" notice, said once per change of circumstance,
+  since a refused account will not fix itself on a timer — and that case cancels
+  the retry rather than spending two more timeouts confirming it.
+- The retry is cancelled when the link drops and when the window closes
+  (`onCloseWidget`, so the file browser is covered too). A request with no network
+  still costs its whole timeout, on the UI thread.
 - Repeated progress updates for one book collapse into the newest. Notes are each
   kept.
 - An upload that can never succeed, such as one for a deleted entry, is discarded

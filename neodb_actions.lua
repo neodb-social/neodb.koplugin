@@ -1144,15 +1144,94 @@ end
 -- Upload queue --------------------------------------------------------------
 
 --[[--
+How long to wait before each further attempt at a queue that would not go.
+
+Three of them, so a flush that fails gives up rather than settling into a poll:
+nothing here is urgent enough to be worth a radio that never gets to sleep. They
+climb steeply because each attempt against a server that has stopped answering
+costs one timeout on the UI thread -- one, not one per op, since `flushQueue`
+stops at the first failure of that kind and keeps the rest in order.
+
+The reason a short first wait is affordable at all is that this is the *recovery*
+path, not the discovery one. Coming online is announced rather than polled for
+(`onNetworkConnected` in `main.lua`), and these cover the seconds after that
+announcement, during which the link is up but DNS is not yet answering.
+]]
+local RETRY_DELAYS = { 8, 24, 72 }
+
+--[[--
+The retry budget for one episode, kept on the context.
+
+In memory on purpose. A queue that could not be sent an hour ago deserves a fresh
+set of attempts now, not the exhausted remains of the last try, and "fresh" is
+exactly what a restart, a book being opened or the network coming back all mean.
+The task closure is built once and reused, because `UIManager` matches scheduled
+tasks by identity and a new closure each time would leave the old ones to fire.
+]]
+local function retryState(ctx)
+    ctx.flush_retry = ctx.flush_retry or { attempt = 0 }
+    return ctx.flush_retry
+end
+
+--- Forward declaration: the retry task calls back into the flush below.
+local backgroundFlush
+
+--[[--
+Gives up on the current episode and forgets that it happened.
+
+Called when the queue is empty, when it emptied, and from `main.lua` when the
+plugin is torn down or the network goes away -- retrying with no link is a
+guaranteed timeout, paid for on the UI thread.
+]]
+function Actions.cancelRetry(ctx)
+    local state = retryState(ctx)
+    if state.task then UIManager:unschedule(state.task) end
+    state.attempt = 0
+end
+
+--- Books the next attempt, if this episode has one left.
+local function armRetry(ctx)
+    local state = retryState(ctx)
+    local delay = RETRY_DELAYS[state.attempt + 1]
+    -- Budget spent. Deliberately left spent: only a fresh occasion re-arms this,
+    -- and `flushSoon` is what decides something counts as one.
+    if not delay then
+        logger.dbg("NeoDB: giving up on the queue for now")
+        return
+    end
+
+    state.attempt = state.attempt + 1
+    state.task = state.task or function() backgroundFlush(ctx) end
+    UIManager:unschedule(state.task)
+    UIManager:scheduleIn(delay, state.task)
+    logger.dbg("NeoDB: retrying the queue in", delay, "s (attempt", state.attempt, ")")
+end
+
+--[[--
 Uploads the queue after the current screen has been drawn, if we can.
 
 Deliberately silent and deliberately not `whenOnline`: this is the background
 path, and a sync nobody asked for must never turn a radio on or raise a dialog.
 Next tick rather than now so whatever prompted it gets painted first -- a request
 blocks the UI thread for as long as its timeout.
+
+The two ways of being offline are not the same thing here, which is why `Util`
+separates them. A radio that is off will not come on by itself, so a timer
+against it is battery spent on a foregone conclusion; `onNetworkConnected` is
+what covers that case, for free. A radio that is on but cannot yet resolve a name
+is the ordinary state for the first seconds after that very event, and is worth
+coming back to.
 ]]
-function Actions.flushSoon(ctx)
-    if not Util.isOnline() then return end
+backgroundFlush = function(ctx)
+    -- Cheap guards first. Both of these run on a path that fires whenever the
+    -- device connects, and `isOnline` below is a real DNS round trip, so a reader
+    -- who is signed out or has nothing waiting must not pay for one.
+    if ctx.store:queueCount() == 0 then return Actions.cancelRetry(ctx) end
+    if not ctx.store:isLoggedIn() then return Actions.cancelRetry(ctx) end
+
+    if not Util.isWifiOn() then return Actions.cancelRetry(ctx) end
+    if not Util.isOnline() then return armRetry(ctx) end
+
     UIManager:nextTick(function()
         -- Read before the flush overwrites it: what we have already said about.
         local previous = ctx.store:getLastFlush()
@@ -1166,11 +1245,32 @@ function Actions.flushSoon(ctx)
         every time a book is opened. Said once per change of circumstance, so it is
         a notice rather than a nag; the Uploads row carries it from then on.
         ]]
-        if (stopped == "unauthorized" or stopped == "forbidden")
-            and stopped ~= (type(previous) == "table" and previous.stopped or nil) then
-            Util.notify(_("NeoDB uploads are paused: sign in again to send them."))
+        if stopped == "unauthorized" or stopped == "forbidden" then
+            if stopped ~= (type(previous) == "table" and previous.stopped or nil) then
+                Util.notify(_("NeoDB uploads are paused: sign in again to send them."))
+            end
+            -- No amount of waiting fixes a sign-in, so this episode ends here
+            -- rather than spending its attempts finding that out twice more.
+            return Actions.cancelRetry(ctx)
         end
+
+        if remaining > 0 then return armRetry(ctx) end
+        Actions.cancelRetry(ctx)
     end)
+end
+
+--[[--
+Sends the queue because something just happened that makes it worth a try.
+
+Every caller is a fresh occasion -- a book opened, highlights settled, progress
+moved, the end of a book, an export, the device coming online -- so each one is
+owed a full set of attempts, whatever an earlier episode came to.
+]]
+function Actions.flushSoon(ctx)
+    -- Cancelled rather than merely reset: an attempt still on the clock from the
+    -- last episode would otherwise fire alongside this one and flush twice.
+    Actions.cancelRetry(ctx)
+    return backgroundFlush(ctx)
 end
 
 function Actions.flushQueue(ctx, quiet, on_done)

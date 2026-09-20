@@ -69,7 +69,11 @@ to have one-gesture access, bind **NeoDB: book actions** in **Settings → Taps 
 
 ## Working offline
 
-Anything you do offline is queued, and goes out next time you are online by itself when you open a book, or on demand from **NeoDB → Uploads**.
+Anything you do offline is queued, and goes out by itself the next time the device is online. You do not have to open a book, or come back to the menu, or do anything at all: turn Wi-Fi on for some other reason and whatever was waiting goes out quietly behind it.
+
+The plugin never turns Wi-Fi on for this, never interrupts you about it, and never sits there checking. It is told when the device connects, so a reader that stays offline for a week costs no battery. If an upload does fail, it tries three more times over about two minutes and then leaves the queue alone until the next time you connect.
+
+You can still send the queue yourself at any time from **NeoDB → Uploads**, which also shows what is waiting.
 
 
 ## Things to know

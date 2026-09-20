@@ -169,14 +169,32 @@ function Util.whenOnline(callback)
 end
 
 --[[--
+True when the radio is on, which is cheap to ask.
+
+The weaker half of `isOnline`, and separated from it because the background
+upload path has to tell two failures apart. A radio that is off will not come on
+by itself, so there is nothing to retry against and a timer would only cost
+battery; a radio that is on but not answering yet is worth coming back to.
+
+(On platforms with no Wi-Fi toggle this reports true, as `NetworkMgr` does, and
+the reachability check below is what decides.)
+]]
+function Util.isWifiOn()
+    return NetworkMgr:isWifiOn() and true or false
+end
+
+--[[--
 True when a request stands a chance of succeeding.
 
 `NetworkMgr:isOnline()` resolves a hostname to decide, which is a real network
 round trip, so skip it when the radio is off and we already know the answer.
-(On platforms with no Wi-Fi toggle, `isWifiOn` reports true and we fall through.)
+
+Worth knowing on the background path: this can be false *just* after KOReader
+announces `NetworkConnected`. That event fires on the link being up, which is
+several DNS-less seconds before a name can be resolved.
 ]]
 function Util.isOnline()
-    if not NetworkMgr:isWifiOn() then return false end
+    if not Util.isWifiOn() then return false end
     return NetworkMgr:isOnline()
 end
 

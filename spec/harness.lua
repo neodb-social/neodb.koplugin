@@ -1522,6 +1522,224 @@ do
         "but not every time a book is opened, which is when this path runs")
 end
 
+--[[--
+The background upload path, which nobody is watching.
+
+Two mechanisms, and the tests below keep them apart because they answer different
+failures. Coming online is *announced* (`onNetworkConnected`), so there is no
+clock asking whether the network is back and an offline week costs nothing. The
+bounded retry exists only for the seconds after that announcement, when the link
+is up but a name will not resolve yet, and for a server that answers badly.
+
+Note on driving it: `UIManager:runTasks` swaps the task list out before running
+it, so a task scheduled *by* a task waits for the next call. One retry is
+therefore two generations -- the timer firing, then the flush it books.
+]]
+check.section("Uploading in the background")
+
+--- Whatever UIManager has been asked to come back to, and when.
+local function pendingDelay()
+    local task = UIManager._tasks[1]
+    return task and task.at
+end
+
+--- One retry cycle: the timer fires, and the flush it books runs after it.
+local function runRetry()
+    UIManager:runTasks()
+    UIManager:runTasks()
+end
+
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+
+    plugin:onNetworkConnected()
+    check.eq(#calls, 0, "nothing goes out before the screen has been painted")
+    UIManager:runTasks()
+    check.eq(#calls, 1, "the queue goes out when the device comes online")
+    check.eq(plugin.store:queueCount(), 0, "and the queue empties")
+    check.eq(Stubs.lastNotification(), nil, "with nothing said about it")
+    check.eq(UIManager:scheduledCount(), 0, "a queue that went out books no retry")
+end
+
+do
+    reset()
+    local plugin = newPlugin()
+    local calls = recordCalls(plugin.api)
+
+    plugin:onNetworkConnected()
+    UIManager:runTasks()
+    check.eq(#calls, 0, "an empty queue costs no request when the device connects")
+    check.eq(UIManager:scheduledCount(), 0, "and books nothing")
+end
+
+do
+    reset()
+    local plugin = newPlugin{ signed_out = true }
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+
+    plugin:onNetworkConnected()
+    UIManager:runTasks()
+    check.eq(#calls, 0, "a signed-out reader is not asked to resolve a hostname")
+    check.eq(UIManager:scheduledCount(), 0, "and nothing is booked on their behalf")
+end
+
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+    Stubs.wifi_on = false
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(#calls, 0, "a radio that is off sends nothing")
+    check.eq(UIManager:scheduledCount(), 0,
+        "and books no retry: it will not come on by itself, so a timer is battery for nothing")
+end
+
+--[[--
+The case the split between `isWifiOn` and `isOnline` exists for.
+
+`NetworkConnected` fires on the link being up, which is a few seconds before DNS
+answers. Without a retry here the event is silently eaten and the queue waits for
+the next book to open.
+]]
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+    Stubs.online = false
+
+    -- Armed without a tick in between, unlike the sending path: there is nothing
+    -- to paint first when no request is going to be made.
+    plugin:onNetworkConnected()
+    check.eq(#calls, 0, "a link with no name resolution yet sends nothing")
+    check.eq(pendingDelay(), 8, "but comes back for it shortly")
+
+    Stubs.online = true
+    runRetry()
+    check.eq(#calls, 1, "and sends it once the name resolves")
+    check.eq(plugin.store:queueCount(), 0, "leaving the queue empty")
+    check.eq(UIManager:scheduledCount(), 0, "and nothing else booked")
+    check.eq(Stubs.lastNotification(), nil, "none of which is worth saying")
+end
+
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api, function() return false, "network_error" end)
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(#calls, 1, "the first attempt is the one that was asked for")
+    check.eq(pendingDelay(), 8, "a failure books the first retry")
+
+    runRetry()
+    check.eq(#calls, 2, "which tries again")
+    check.eq(pendingDelay(), 24, "and backs off")
+
+    runRetry()
+    check.eq(#calls, 3, "a third time")
+    check.eq(pendingDelay(), 72, "backing off further")
+
+    runRetry()
+    check.eq(#calls, 4, "and a fourth, which is the last")
+    check.eq(UIManager:scheduledCount(), 0,
+        "after three retries it gives up rather than settling into a poll")
+    check.eq(plugin.store:queueCount(), 1, "the queue is kept, to go out another day")
+    check.eq(Stubs.lastNotification(), nil, "and the reader is never told any of it")
+end
+
+--[[--
+A spent budget is spent for that episode only. Anything that makes a fresh
+occasion -- a book opening, the device connecting -- is owed a full set again,
+or one bad afternoon would silence the feature until a restart.
+]]
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local failing = true
+    local calls = recordCalls(plugin.api, function()
+        if failing then return false, "network_error" end
+        return true, {}, 200
+    end)
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    runRetry(); runRetry(); runRetry()
+    check.eq(#calls, 4, "the first episode spends its budget")
+    check.eq(UIManager:scheduledCount(), 0, "and stops")
+
+    plugin:onNetworkConnected()
+    UIManager:runTasks()
+    check.eq(#calls, 5, "connecting again is a fresh occasion")
+    check.eq(pendingDelay(), 8, "with the whole budget back")
+    check.eq(UIManager:scheduledCount(), 1,
+        "and one attempt on the clock, not the old one as well")
+
+    failing = false
+    runRetry()
+    check.eq(plugin.store:queueCount(), 0, "and it gets through")
+    check.eq(UIManager:scheduledCount(), 0, "with nothing left booked")
+end
+
+--[[--
+A sign-in is not something waiting fixes, so that episode ends at once rather
+than spending two more timeouts finding out. The notice itself is the one thing
+this whole path is allowed to say, and it is still said only once.
+]]
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api, function() return false, "unauthorized", 401 end)
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(#calls, 1, "the account is asked once")
+    check.eq(UIManager:scheduledCount(), 0, "and no retry is booked against a sign-in")
+end
+
+--[[--
+Both of these cost a whole timeout on the UI thread if they are allowed to fire,
+and the second would fire against a plugin whose window is gone.
+]]
+do
+    reset()
+    local plugin = newPlugin()
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api, function() return false, "network_error" end)
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(pendingDelay(), 8, "a retry is waiting")
+
+    -- A book opening while an attempt is already on the clock has to replace it,
+    -- or the two fire together and flush the same queue twice.
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(UIManager:scheduledCount(), 1, "a fresh occasion replaces a waiting attempt")
+    check.eq(pendingDelay(), 8, "and starts its counting over")
+
+    plugin:onNetworkDisconnected()
+    check.eq(UIManager:scheduledCount(), 0, "losing the link drops it")
+
+    Actions.flushSoon(plugin.ctx)
+    UIManager:runTasks()
+    check.eq(pendingDelay(), 8, "another is waiting")
+    plugin:onCloseWidget()
+    check.eq(UIManager:scheduledCount(), 0,
+        "and closing the window drops it, file browser included")
+    check.eq(#calls, 3, "and only the three deliberate flushes ever reached the server")
+end
+
 check.section("A post longer than the server takes")
 do
     reset()

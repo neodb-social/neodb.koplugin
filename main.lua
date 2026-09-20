@@ -180,6 +180,10 @@ end
 --- Takes the lent context back, so a torn-down UI cannot be exported through.
 function NeoDB:onCloseWidget()
     ExportTarget:detach(self.ctx)
+    -- The retry outlives the document -- the queue is drained from the file
+    -- browser too -- so it is cancelled here rather than in `onCloseDocument`,
+    -- which the file browser never sees.
+    Actions.cancelRetry(self.ctx)
 end
 
 function NeoDB:isReader()
@@ -913,12 +917,47 @@ end
 -- Automatic syncing ---------------------------------------------------------
 --
 -- Both hooks below are opt-in and deliberately quiet. They never turn Wi-Fi on
--- by themselves: work is queued and flushed the next time the reader does
--- something online, so finishing a book never triggers a radio and a dialog.
+-- by themselves: work is queued, and goes out when the device is next connected
+-- anyway, so finishing a book never triggers a radio and a dialog.
+--
+-- "Next connected" is told to us rather than looked for. KOReader broadcasts
+-- `NetworkConnected`, so there is no clock anywhere in this plugin asking
+-- whether the network is back, and a device that stays offline for a week costs
+-- nothing at all. The only timer involved is the short, bounded one in
+-- `Actions.flushSoon`, covering the seconds between that event and a name
+-- actually resolving.
 
 --- Uploads the queue after the current screen has been drawn, if we can.
 function NeoDB:flushSoon()
     Actions.flushSoon(self.ctx)
+end
+
+--[[--
+Picks the queue up the moment the device is online, whoever turned it on.
+
+This is what makes a queued mark seem to send itself. The reader turns Wi-Fi on
+for something else entirely -- a sync, a download, a browse -- and whatever has
+been waiting goes out behind it, silently, with no radio raised on its account
+and no dialog asking for one.
+
+`flushSoon` checks the queue, the sign-in and the radio itself, so there is
+nothing to guard here; it is also what decides this counts as a fresh occasion
+and hands the retry a full budget again.
+]]
+function NeoDB:onNetworkConnected()
+    self:flushSoon()
+    -- Deliberately no `return true`: every other module wants this event too.
+end
+
+--[[--
+Stops trying the moment the link goes away.
+
+Not an optimisation. A request with no network still costs its whole timeout, and
+it is spent on the UI thread, so a retry that fires just after the Wi-Fi went off
+is a screen that stops responding for no reason at all.
+]]
+function NeoDB:onNetworkDisconnected()
+    Actions.cancelRetry(self.ctx)
 end
 
 --[[--
