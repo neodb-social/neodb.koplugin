@@ -1552,6 +1552,7 @@ end
 do
     reset()
     local plugin = newPlugin()
+    plugin.store:set("upload_on_connect", true)
     plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
     local calls = recordCalls(plugin.api)
 
@@ -1567,6 +1568,7 @@ end
 do
     reset()
     local plugin = newPlugin()
+    plugin.store:set("upload_on_connect", true)
     local calls = recordCalls(plugin.api)
 
     plugin:onNetworkConnected()
@@ -1578,6 +1580,7 @@ end
 do
     reset()
     local plugin = newPlugin{ signed_out = true }
+    plugin.store:set("upload_on_connect", true)
     plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
     local calls = recordCalls(plugin.api)
 
@@ -1611,6 +1614,7 @@ the next book to open.
 do
     reset()
     local plugin = newPlugin()
+    plugin.store:set("upload_on_connect", true)
     plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
     local calls = recordCalls(plugin.api)
     Stubs.online = false
@@ -1629,11 +1633,17 @@ do
     check.eq(Stubs.lastNotification(), nil, "none of which is worth saying")
 end
 
+--[[--
+The retry belongs to every flush, not to the switch. This book was opened, which
+is a trigger that predates all of this, and `upload_on_connect` is left off
+throughout -- a failed upload is worth another try whoever asked for it.
+]]
 do
     reset()
     local plugin = newPlugin()
     plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
     local calls = recordCalls(plugin.api, function() return false, "network_error" end)
+    check.eq(plugin.store:get("upload_on_connect"), false, "with the switch off")
 
     Actions.flushSoon(plugin.ctx)
     UIManager:runTasks()
@@ -1664,6 +1674,7 @@ or one bad afternoon would silence the feature until a restart.
 do
     reset()
     local plugin = newPlugin()
+    plugin.store:set("upload_on_connect", true)
     plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
     local failing = true
     local calls = recordCalls(plugin.api, function()
@@ -1738,6 +1749,62 @@ do
     check.eq(UIManager:scheduledCount(), 0,
         "and closing the window drops it, file browser included")
     check.eq(#calls, 3, "and only the three deliberate flushes ever reached the server")
+end
+
+--[[--
+The switch in front of all that.
+
+Uploading on connect is the one automatic path with no reading behind it, so it
+is off until asked for. The retry is not gated on it -- see the section above.
+]]
+check.section("The switch for uploading on connect")
+
+local function settingsRow(plugin, text)
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == text then return row end
+    end
+end
+
+local UPLOAD_ROW = "Upload automatically when connected"
+
+do
+    reset()
+    local plugin = newPlugin()
+    check.eq(plugin.store:get("upload_on_connect"), false, "off out of the box")
+
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+    plugin:onNetworkConnected()
+    UIManager:runTasks()
+    check.eq(#calls, 0, "so connecting sends nothing, however much is waiting")
+    check.eq(plugin.store:queueCount(), 1, "and the queue is left where it was")
+    check.eq(UIManager:scheduledCount(), 0, "with nothing booked behind it")
+end
+
+do
+    reset()
+    local plugin = newPlugin()
+    local row = settingsRow(plugin, UPLOAD_ROW)
+    check.ok(row ~= nil, "the switch is among the other global switches")
+    check.eq(row.checked_func(), false, "showing itself off")
+    check.ok(row.help_text ~= nil, "and explaining itself on a long press")
+
+    plugin.store:enqueue({ method = "POST", path = "/a", label = "a" })
+    local calls = recordCalls(plugin.api)
+
+    row.callback()
+    check.eq(row.checked_func(), true, "tapping it turns it on")
+    UIManager:runTasks()
+    check.eq(#calls, 1,
+        "and sends what was already waiting, rather than waiting for the next connect")
+    check.eq(Stubs.lastNotification(), nil, "quietly, like everything else on this path")
+
+    row.callback()
+    check.eq(row.checked_func(), false, "tapping it again turns it off")
+    plugin.store:enqueue({ method = "POST", path = "/b", label = "b" })
+    plugin:onNetworkConnected()
+    UIManager:runTasks()
+    check.eq(#calls, 1, "and connecting stops sending again")
 end
 
 check.section("A post longer than the server takes")

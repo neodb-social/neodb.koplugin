@@ -53,6 +53,22 @@ local DEFAULTS = {
     ]]
     offer_link_on_open      = true,
 
+    --[[--
+    Whether the queue empties itself the moment the device is online.
+
+    Off by default, although it is the quieter setting of the two. It is the only
+    thing in the plugin that acts on the network with no reading in front of it --
+    every other automatic path is started by a book being opened, read or closed --
+    and uploading is not something to begin doing on a reader's behalf because
+    they installed a plugin. Whoever wants it will find it; the Uploads row is
+    what tells them there is something to want.
+
+    It gates only the announcement being acted on. The bounded retry behind
+    `Actions.flushSoon` is not conditional on it: that one belongs to every
+    flush, including the ones this switch has nothing to do with.
+    ]]
+    upload_on_connect       = false,
+
     --- Crossposting for shared highlights, deliberately separate from
     --- `post_to_fediverse`: a book's worth of quotes is a different proposition
     --- for whoever follows you than the marks and notes you write by hand.

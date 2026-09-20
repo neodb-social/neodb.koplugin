@@ -87,16 +87,23 @@ and colour filters.
 
 ### The queue
 
-- **The queue empties itself when the device connects**, with no radio raised, no
-  message, and nothing that polls. KOReader broadcasts `NetworkConnected`;
+- **The queue can empty itself when the device connects**, with no radio raised,
+  no message, and nothing that polls. KOReader broadcasts `NetworkConnected`;
   `main.lua` handles it and hands the queue to `Actions.flushSoon`. A device that
   stays offline for a week therefore costs nothing at all, and a reader who turns
-  Wi-Fi on for some other reason gets their backlog sent behind it. The older
-  triggers — a book opening, the hourly progress tick, the end of a book, an
-  annotation sync, an export — still fire; they are now the fallback rather than
-  the only route.
-- **A failed flush retries three times, at 8 s, 24 s and 72 s, then stops.** Each
-  fresh occasion (any of the triggers above) resets that budget; only a failed
+  Wi-Fi on for some other reason gets their backlog sent behind it.
+- **That one is off by default**, behind **Settings → Upload automatically when
+  connected** (`upload_on_connect`). It is the only automatic path in the plugin
+  with no reading behind it — every other one is started by a book being opened,
+  read or closed — so it is the one the reader has to ask for. Turning it on
+  flushes whatever is already waiting, because a switch that says "when
+  connected" and then sits still on a connected device reads as broken.
+- The older triggers — a book opening, the hourly progress tick, the end of a
+  book, an annotation sync, an export — are unaffected by that switch and still
+  fire.
+- **A failed flush retries three times, at 8 s, 24 s and 72 s, then stops.** This
+  is *not* gated on the switch: it belongs to every flush, whoever asked for it.
+  Each fresh occasion (any trigger above) resets the budget; only a failed
   attempt books the next one. Nothing retries forever, because nothing here is
   urgent enough to be worth a radio that never sleeps.
 - **`NetworkConnected` arrives before DNS works.** It fires on the link being up,

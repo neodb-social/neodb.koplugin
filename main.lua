@@ -812,6 +812,23 @@ function NeoDB:settingsMenu()
                 },
             },
         },
+        --[[--
+        Not in the Uploads submenu, although that is where the question occurs to
+        a reader: a switch belongs with the other switches, and a reader looking
+        for what this plugin does by itself looks here.
+
+        Turning it on sends what is already waiting, silently and without asking
+        for Wi-Fi, because a switch that says "when connected" and then does
+        nothing while the device is connected reads as a broken one.
+        ]]
+        {
+            text = _("Upload automatically when connected"),
+            help_text = _("Anything waiting to upload is sent quietly whenever the device goes online, whatever put it online. This never turns Wi-Fi on by itself and never interrupts you. With this off, uploads wait until you open a book or send them from the Uploads menu."),
+            checked_func = function() return store:get("upload_on_connect") end,
+            callback = function()
+                if store:toggle("upload_on_connect") then Actions.flushSoon(ctx) end
+            end,
+        },
         {
             text = _("Mark as Finished at the end of a book"),
             help_text = _("When you reach the last page of a linked book, set its NeoDB status to Finished."),
@@ -940,11 +957,17 @@ for something else entirely -- a sync, a download, a browse -- and whatever has
 been waiting goes out behind it, silently, with no radio raised on its account
 and no dialog asking for one.
 
-`flushSoon` checks the queue, the sign-in and the radio itself, so there is
-nothing to guard here; it is also what decides this counts as a fresh occasion
-and hands the retry a full budget again.
+Off unless asked for. This is the one automatic path with no reading behind it,
+so it is the one the reader has to turn on; everything else here is started by a
+book being opened, read or closed. The switch lives in Settings, and the Uploads
+row is what suggests there is something to turn on.
+
+Past that, `flushSoon` checks the queue, the sign-in and the radio itself, so
+there is nothing else to guard here; it is also what decides this counts as a
+fresh occasion and hands the retry a full budget again.
 ]]
 function NeoDB:onNetworkConnected()
+    if not self.store:get("upload_on_connect") then return end
     self:flushSoon()
     -- Deliberately no `return true`: every other module wants this event too.
 end
