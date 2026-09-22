@@ -26,6 +26,12 @@ the last case nothing is recorded, so the next open tries again. In all the
 others the question is recorded as settled, so unlinking a book later does not
 bring it back.
 
+**Linking a book again** to the entry it already has keeps everything the book
+had learned: the ledger of highlights already posted, both per-book switches, the
+last progress sent and the last known mark. Only the catalog details are
+refreshed. Linking it to a different entry starts fresh, because the notes the
+ledger names were posted on the old one.
+
 **The dialog that follows a link** asks three things together: the status,
 already set to whatever NeoDB holds or to Reading when it holds nothing; whether
 the book reports progress on its own; and whether it uploads highlights. The only
