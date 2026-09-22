@@ -123,6 +123,32 @@ function Match.linkTo(ctx, item, on_done)
         isbn   = item.isbn,
         pages  = tonumber(item.pages),
     }
+
+    --[[--
+    Linking a book again, to the entry it already has, must not reset it.
+
+    The find rows stay on the menu after a book is linked, so this is an ordinary
+    thing to do -- and a fresh table would hand `setLink` a link with no
+    `annotation_sync`, which it seeds anew. That erases the ledger of what NeoDB
+    has already been told, so "Upload all" and the exporter post every highlight
+    a second time and the mirror can no longer delete any of them; it also drops
+    the answers the reader gave this book, so the dialog below reopens on the
+    global defaults. Everything the book had learned is therefore carried over,
+    the cached mark included, so a status read that fails here still shows what
+    was last known.
+
+    Only for the same entry on the same server: `getLink` already answers nil for
+    a link made against another instance, and a different entry's ledger names
+    notes that belong to it, not to the new one.
+    ]]
+    local existing = ctx.store:getLink(ctx.ui.doc_settings)
+    if existing and existing.uuid == item.uuid then
+        link.annotation_sync = existing.annotation_sync
+        link.auto_progress   = existing.auto_progress
+        link.progress        = existing.progress
+        link.mark            = existing.mark
+        link.mark_checked    = existing.mark_checked
+    end
     ctx.store:setLink(ctx.ui.doc_settings, link)
 
     local done = Util.busy(_("Reading your NeoDB status for this book…"))

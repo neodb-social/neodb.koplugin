@@ -912,6 +912,69 @@ do
         "and a later change of default does not reach back into it")
 end
 
+check.section("Linking a book again")
+do
+    --[[--
+    The find rows stay on the menu once a book is linked, so linking it again to
+    the entry it already has is an ordinary thing to do. It used to hand `setLink`
+    a fresh table, which reseeded the highlight ledger and dropped every answer
+    the book had given -- so "Upload all" posted everything twice and the link
+    dialog reopened on the defaults.
+    ]]
+    reset()
+    local plugin = newPlugin{ paging = true, page = 100, pages = 400 }
+    linkBook(plugin)
+    Annotations.setEnabled(plugin.ctx, true)
+    Annotations.markQueued(plugin.ctx, "2026-01-01 10:00:00")
+    plugin.store:setAutoProgress(plugin.ui.doc_settings, true)
+    plugin.store:cacheProgress(plugin.ui.doc_settings, "percentage", "42")
+    plugin.store:cacheMark(plugin.ui.doc_settings, { shelf_type = "progress", rating_grade = 8 })
+
+    -- The status read fails in transit, so what was cached is all there is.
+    Stubs.respond = function() return nil, "connection refused" end
+    Match.linkTo(plugin.ctx, { uuid = "item-1", title = "Dune (new printing)", url = "/book/item-1" })
+
+    local link = plugin.store:getLink(plugin.ui.doc_settings)
+    check.eq(link.title, "Dune (new printing)", "what the catalog says about the entry is refreshed")
+    check.eq(link.annotation_sync.enabled, true, "but the book keeps its upload switch")
+    check.eq(link.annotation_sync.sent["2026-01-01 10:00:00"], true,
+        "and its ledger of what NeoDB has already been told")
+    check.eq(link.auto_progress, true, "and its progress switch")
+    check.eq(link.progress.value, "42", "and the last position it sent")
+    check.eq(link.mark.shelf_type, "progress",
+        "and the mark it last knew, since the read that would replace it failed")
+    check.eq(link.mark.rating_grade, 8)
+
+    local dialog = Stubs.lastShown("ButtonDialog")
+    check.ok(dialog.title:find("On NeoDB: Reading", 1, true) ~= nil,
+        "so the dialog still says where the book stands")
+    check.eq(dialog:label("auto_progress"), "Update progress: on",
+        "and opens on this book's own answers, not the defaults")
+    check.eq(dialog:label("upload"), "Upload highlights: on")
+
+    -- A different entry is a different book as far as the ledger is concerned:
+    -- the notes it names were posted on the old one.
+    reset()
+    plugin = newPlugin{ paging = true, page = 100, pages = 400 }
+    linkBook(plugin)
+    Annotations.setEnabled(plugin.ctx, true)
+    Annotations.markQueued(plugin.ctx, "2026-01-01 10:00:00")
+    plugin.store:setAutoProgress(plugin.ui.doc_settings, true)
+    Stubs.respond = function(request)
+        if request.method == "GET" then return 404, {}, "{}" end
+        return 200, {}, "{}"
+    end
+    Match.linkTo(plugin.ctx, { uuid = "item-2", title = "Dune Messiah", url = "/book/item-2" })
+
+    link = plugin.store:getLink(plugin.ui.doc_settings)
+    check.eq(link.uuid, "item-2")
+    check.eq(link.annotation_sync.enabled, false, "linking to another entry starts fresh")
+    check.eq(next(link.annotation_sync.sent or {}), nil, "with an empty ledger")
+    check.eq(link.auto_progress, nil, "and no answers recorded yet")
+    check.eq(link.mark, nil, "and the mark is what the server says, not what the old entry had")
+    check.ok(link.mark_checked ~= nil)
+end
+
 check.section("Offering a link when a book opens")
 do
     --[[--
