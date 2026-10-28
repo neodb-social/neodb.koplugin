@@ -14,6 +14,11 @@ Link the book you are reading to its entry on a NeoDB server, then keep your sta
 
 ## Install
 
+The interface follows KOReader's language setting: Simplified Chinese is fully
+translated, and English uses the original labels. Generated note titles and the
+quote introduction follow the same language; your book metadata and note text
+are never translated. Restart KOReader after changing its interface language.
+
 **From a plugin store**, which handles updates afterwards: search for **NeoDB** in [Storefront](https://github.com/ultimatejimmy/storefront.koplugin) or [AppStore](https://github.com/omer-faruq/appstore.koplugin).
 
 **Manually**: download `neodb.koplugin.zip` from [the latest release](https://github.com/neodb-social/neodb.koplugin/releases/latest) and unzip it into KOReader's `plugins` folder. The zip already holds a correctly named folder, so there is nothing to rename.
@@ -54,7 +59,59 @@ Most features are under the **☰ → Tools → NeoDB** menu:
 - **Post something…** writes a post with no book attached.
 - **Settings for this book** holds that book's own switches.
 
-To share one quote, select the text and choose **Share on NeoDB** from the selection menu.
+Choose **Add note & share** to write a note about selected text and share it to
+NeoDB. The title and scrollable body are edited in one window. The editor adapts
+to the on-screen keyboard and follows KOReader's virtual keyboard setting when
+a hardware keyboard is available. Drag the window by its header, as with the
+native note editor. The default title is empty.
+
+The quote button cycles through four modes:
+
+- **Quote: below note** (default): append the selected passage when posting.
+- **Quote: above note**: prepend the passage when posting.
+- **Quote: none**: post only the note, without a passage or introduction.
+- **Quote: custom**: put the passage in the editor before the note, so the whole
+  post can be freely edited. Nothing is added when posting.
+
+Automatic quote modes keep the added passage out of the editor and local note.
+Custom mode saves the entire editor body, including any remaining quotation,
+when local saving is explicitly enabled. Reopening a saved custom note does not
+insert its quotation again. Ordinary and custom drafts are retained separately
+when switching modes. None and custom require a non-empty body.
+
+**Save locally: on / off** controls whether posting also saves the editor body
+as a KOReader note. It starts on for new selections, unless changed in settings,
+but always starts **off for existing annotations** to protect their local notes.
+Turn it on explicitly to edit an existing local note. An empty body in automatic
+quote mode saves a highlight without a note. Cancelling creates no annotation.
+
+Under **NeoDB → Settings → Selection sharing defaults**, configure quote mode,
+attaching progress, saving new notes locally, crossposting selected text,
+automatic titles and quote introductions. Composer overrides apply only to that
+post. Global visibility, block quote formatting and crossposting remain in the
+main Settings menu. Both global and selection crossposting are **off by default**
+and have independent switches. Existing explicitly saved preferences are kept.
+
+Automatic titles and introductions are off by default. Each can be enabled as
+**Plain text** or **With emoji**. Titles include the book, chapter and live
+percentage when available, for example `Reading notes | Dune · Chapter One · 48%`.
+The decorated version starts with `📖`. Other title presets show only the book,
+the book and chapter, or the book and progress. **Custom…** accepts a title
+template with `{book}`, `{chapter}` and `{progress}` placeholders.
+
+Introduction presets include `Quoted passage:`, `Quoted passage: 👇`, `Excerpt:`,
+`Original text:` and `From the book:`. **Custom…** accepts your own introduction,
+including multiple lines. The introduction precedes the quotation regardless of
+whether that quotation appears above or below the note. Sharing uses the same
+introduction setting, including posts without note text. Custom mode adds neither
+an automatic introduction nor an extra quote.
+
+The editor was checked with **KOReader v2026.07.1**. Its optimized two-field
+layout uses internal widget APIs behind a guarded resize operation. If that
+layout cannot be resized, it preserves the drafts in the standard body editor
+with an **Edit title** button. Keyboard and focus changes avoid repainting all
+windows when the layout has not changed. E-ink refresh behavior still needs
+physical-device testing.
 
 To update reading progress once an hour, turn on **Settings for this book → Update reading progress automatically**.
 

@@ -23,10 +23,18 @@ Store.__index = Store
 --- Preferences and their defaults. Anything not listed here has no default.
 local DEFAULTS = {
     default_visibility     = 0,       -- public
-    post_to_fediverse      = false,   -- don't broadcast unless asked
+    post_to_fediverse      = false,   -- preserve opt-in behavior for existing users
     progress_unit          = "auto",  -- auto | page | percentage
     auto_mark_finished     = false,
     quote_as_blockquote    = true,
+    quote_position         = "after",  -- after | before | none | custom
+    note_attach_progress   = true,
+    note_save_local        = true,
+    selection_crosspost    = false,  -- independent from ratings and shelf updates
+    note_title_style       = "none", -- none | plain | decorated | book | book_chapter | book_progress | custom
+    quote_intro_style      = "none", -- none | plain | decorated | excerpt | original | from_book | custom
+    note_title_template    = "{book} · {chapter} · {progress}",
+    quote_intro_text       = "",
 
     --[[--
     The two "defaults for a new book" switches.

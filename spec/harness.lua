@@ -451,69 +451,597 @@ do
     check.ok(link.annotation_sync.since ~= nil, "and is stamped for next time")
 end
 
-check.section("Sharing a highlight by hand")
+check.section("Review: conservative defaults and independent selection preferences")
 do
-    --[[--
-    The highlight menu is reachable for an annotation the book already holds,
-    through the edit dialog's "…" button, which hands the button factory the
-    annotation's index. So the composer and the mirror can be looking at the same
-    highlight, and only the ledger keeps one of them from posting it twice.
-    ]]
+    reset()
+    local plugin = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    check.eq(plugin.store:get("post_to_fediverse"), false, "untouched users remain opted out of global crossposting")
+    check.eq(plugin.store:get("selection_crosspost"), false, "selection crossposting is also opt-in")
+    local settings = plugin:settingsMenu()
+    local sharing
+    local global_crosspost, global_visibility
+    for _idx, row in ipairs(settings) do
+        if row.text == "Selection sharing defaults" then sharing = row.sub_item_table end
+        if row.text == "Crosspost to connected social networks" then global_crosspost = row end
+        if row.text_func and row.text_func():find("Default visibility:", 1, true) then global_visibility = row end
+    end
+    check.ok(global_crosspost and global_visibility, "global preferences remain in main Settings")
+    for _idx, row in ipairs(sharing) do
+        check.ok(row.text ~= "Crosspost to connected social networks", "selection submenu does not hide global crossposting")
+    end
+    plugin.store:set("selection_crosspost", true)
+    Actions.addNote(plugin.ctx, {quote = "Passage"})
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "", "default title is empty")
+    dialog:press("post")
+    local body = plugin.store:getQueue()[1].body
+    check.eq(body.content, "> Passage", "default content adds no introduction or emoji")
+    check.eq(body.post_to_fediverse, true, "selection uses its own crosspost switch")
+    Actions.addNote(plugin.ctx, {note = "Ordinary note"})
+    Stubs.lastShown("InputDialog"):press("post")
+    check.eq(plugin.store:getQueue()[2].body.post_to_fediverse, false, "ordinary notes retain the global opt-out")
+    plugin.store:set("post_to_fediverse", true)
+    check.eq(Store:new():get("post_to_fediverse"), true, "explicit global opt-in persists")
+    plugin.store:set("post_to_fediverse", false)
+    check.eq(Store:new():get("post_to_fediverse"), false, "explicit global opt-out persists")
+    plugin.store:set("note_title_style", "plain")
+    plugin.store:set("quote_intro_style", "plain")
+    Actions.addNote(plugin.ctx, {quote = "Passage"})
+    dialog = Stubs.lastShown("InputDialog")
+    check.ok(dialog:getNoteTitle():find("Reading notes |", 1, true) == 1, "plain automatic title is opt-in")
+    check.eq(dialog:getNoteTitle():find("📖", 1, true), nil, "plain title has no emoji")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[3].body.content, "Quoted passage:\n\n> Passage", "plain introduction applies even without note text")
+end
+
+check.section("Title presets, custom templates and introductions in either position")
+do
+    reset()
+    local plugin, ui = newPlugin{footer_percent = 0.48}
+    linkBook(plugin)
+    Stubs.online = false
+    ui.toc = {getTocTitleByPage = function() return "Chapter One" end}
+    for style, expected in pairs({book = "Book: Dune", book_chapter = "Book: Dune · Chapter One",
+            book_progress = "Book: Dune · 48%"}) do
+        plugin.store:set("note_title_style", style)
+        Actions.addNote(plugin.ctx, {quote = "Passage"})
+        check.eq(Stubs.lastShown("InputDialog"):getNoteTitle(), expected, "title preset " .. style)
+        Stubs.lastShown("InputDialog"):press("close")
+    end
+    plugin.store:set("note_title_style", "custom")
+    plugin.store:set("note_title_template", "{book} | {chapter} | {progress} | 100% | {unknown}")
+    Actions.addNote(plugin.ctx, {quote = "Passage"})
+    check.eq(Stubs.lastShown("InputDialog"):getNoteTitle(), "Dune | Chapter One | 48% | 100% | {unknown}",
+        "custom templates expand only known placeholders without interpreting percentages")
+    Stubs.lastShown("InputDialog"):press("close")
+    for style, intro in pairs({excerpt = "Excerpt:", original = "Original text:", from_book = "From the book:",
+            custom = "My own words —\n100% literal"}) do
+        plugin.store:set("quote_intro_style", style)
+        plugin.store:set("quote_intro_text", "My own words —\n100% literal")
+        for _idx, position in ipairs({"before", "after"}) do
+            plugin.store:set("quote_position", position)
+            Actions.addNote(plugin.ctx, {quote = "Passage", note = "Thoughts"})
+            Stubs.lastShown("InputDialog"):press("post")
+            local quote = intro .. "\n\n> Passage"
+            local expected = position == "before" and quote .. "\n\nThoughts" or "Thoughts\n\n" .. quote
+            check.eq(plugin.store:getQueue()[plugin.store:queueCount()].body.content, expected,
+                style .. " introduction stays with the quote " .. position)
+        end
+    end
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == "Selection sharing defaults" then
+            for _j, setting in ipairs(row.sub_item_table) do
+                if setting.text == "Automatic note title" then
+                    check.eq(#setting.sub_item_table, 7, "title menu includes presets and a custom template")
+                    setting.sub_item_table[7].callback()
+                    local editor = Stubs.lastShown("InputDialog")
+                    editor:typeText("Custom: {book}")
+                    editor:press("save")
+                    check.eq(plugin.store:get("note_title_template"), "Custom: {book}", "custom template editor persists text")
+                    check.eq(plugin.store:get("note_title_style"), "custom", "saving selects the custom style")
+                end
+            end
+        end
+    end
+end
+
+check.section("Sharing an existing annotation without local edits")
+do
     reset()
     local plugin, ui = newPlugin{
         annotations = { annotation{ datetime = "2026-08-01 09:00:00" } },
     }
     linkBook(plugin, { annotation_sync = { enabled = true, since = "2026-07-01 00:00:00" } })
     Stubs.online = false
-
-    local factory = ui.highlight.buttons["13_neodb_quote"]
-    check.ok(factory ~= nil, "the highlight menu offers sharing")
-
-    local button = factory({
-        selected_text = { text = "The spice must flow." },
+    check.eq(ui.highlight.buttons["13_neodb_quote"], nil, "the redundant Share on NeoDB action is removed")
+    local factory = ui.highlight.buttons["14_neodb_note"]
+    factory({
+        selected_text = { text = "The spice must flow.", pos0 = "start", pos1 = "end" },
         onClose = function() end,
-    }, 1)
-    button.callback()
-
+    }, 1).callback()
     local dialog = Stubs.lastShown("InputDialog")
-    check.eq(dialog.title, "Share a quote", "the composer opens with the passage")
-    dialog:press("Post")
+    check.eq(dialog:label("save_local"), "Save locally: off", "existing annotations are shared without local edits by default")
+    dialog:press("post")
+    check.eq(plugin.store:queueCount(), 1, "the quote-only post is queued")
+    check.eq(plugin.store:getQueue()[1].annotation.key, "2026-08-01 09:00:00",
+        "share-only keeps the existing annotation's deduplication key")
+    check.eq(Annotations.queueNew(plugin.ctx), 0, "the mirror does not duplicate the share-only post")
+end
 
-    check.eq(plugin.store:queueCount(), 1, "the note is queued")
-    local op = plugin.store:getQueue()[1]
-    check.eq(op.annotation and op.annotation.key, "2026-08-01 09:00:00",
-        "tagged with the annotation it came from, so its uuid can be filed")
-
-    check.eq(Annotations.queueNew(plugin.ctx), 0,
-        "and the mirror does not post the same highlight a second time")
-
-    -- A fresh selection is not an annotation yet, so there is nothing to record.
+check.section("Quote composers keep the editor separate from the outgoing quote")
+do
     reset()
-    plugin, ui = newPlugin()
+    local plugin = newPlugin()
     linkBook(plugin)
     Stubs.online = false
-    -- Refetched: the factory closes over the plugin that registered it.
-    factory = ui.highlight.buttons["13_neodb_quote"]
-    button = factory({
-        selected_text = { text = "A passage nobody highlighted." },
-        onClose = function() end,
-    }, nil)
-    button.callback()
-    Stubs.lastShown("InputDialog"):press("Post")
-    check.eq(plugin.store:getQueue()[1].annotation, nil,
-        "sharing a bare selection tags nothing")
+    plugin.store:set("quote_intro_style", "decorated")
+    plugin.store:set("note_title_style", "decorated")
+    Actions.addNote(plugin.ctx, { quote = "First line\n第二行" })
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getInputText(), "", "the editor starts without quoted text")
+    check.eq(dialog:label("quote_position"), "Quote: below note", "the default puts the quote below the note")
+    dialog:typeText("My thoughts.")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[1].body.content,
+        "My thoughts.\n\nQuoted passage: 👇\n\n> First line\n> 第二行", "only the outgoing post contains the introduction and block quote")
 
-    -- A refusal must not leave the highlight recorded as posted.
+    Actions.addNote(plugin.ctx, { quote = "A passage." })
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText("My thoughts.")
+    dialog:press("quote_position")
+    check.eq(dialog:label("quote_position"), "Quote: above note", "the order button updates its label")
+    check.eq(dialog:getInputText(), "My thoughts.", "changing order leaves the draft alone")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[2].body.content, "Quoted passage: 👇\n\n> A passage.\n\nMy thoughts.",
+        "the outgoing quote can precede the note")
+    check.eq(plugin.store:get("quote_position"), "after", "a temporary quote choice does not replace the default")
+    plugin.store:set("quote_position", "before")
+
+    Actions.addNote(plugin.ctx, { quote = "Quote only." })
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:label("quote_position"), "Quote: above note", "the next composer restores the preference")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[3].body.content, "Quoted passage: 👇\n\n> Quote only.", "quote-only posts use the same configured introduction")
+
+    plugin.store:set("quote_as_blockquote", false)
+    plugin.store:set("quote_position", "after")
+    Actions.addNote(plugin.ctx, { quote = "Plain quote." })
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeText("Thoughts.")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[4].body.content, "Thoughts.\n\nQuoted passage: 👇\n\nPlain quote.",
+        "the existing block quote preference is respected")
+
+    Actions.addNote(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:findButton("quote_position"), nil, "ordinary notes have no quote control")
+    dialog:press("post")
+    check.eq(plugin.store:queueCount(), 4, "an empty ordinary note is rejected")
+    dialog:typeText("Standalone note.")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[5].body.content, "Standalone note.", "ordinary notes still post their text")
+end
+
+check.section("No quote and editable custom quote modes")
+do
     reset()
-    plugin, ui = newPlugin{ annotations = { annotation{ datetime = "2026-08-01 09:00:00" } } }
-    linkBook(plugin, { annotation_sync = { enabled = true, since = "2026-07-01 00:00:00" } })
+    local plugin = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    local saved = {}
+    local opts = { quote = "First line\n第二行", note = "Thoughts", save_note = function(note)
+        saved[#saved + 1] = note
+        return "2026-08-01 09:00:00"
+    end }
+    Actions.addNote(plugin.ctx, opts)
+    local dialog = Stubs.lastShown("InputDialog")
+    dialog:press("quote_position")
+    dialog:press("quote_position")
+    check.eq(dialog:label("quote_position"), "Quote: none", "below and above are followed by none")
+    dialog:typeText("  ")
+    dialog:press("post")
+    check.eq(#saved, 0, "an empty no-quote note does not mutate local annotations")
+    check.eq(plugin.store:queueCount(), 0, "an empty no-quote note is not queued")
+    dialog:typeText("Only my note")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[1].body.content, "Only my note", "none omits the quote and introduction")
+    check.eq(saved[1], "Only my note", "none saves only the note locally")
+    check.eq(plugin.store:get("quote_position"), "after", "a temporary none choice leaves the default alone")
+    plugin.store:set("quote_position", "none")
+
+    Actions.addNote(plugin.ctx, opts)
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:label("quote_position"), "Quote: none", "none is restored")
+    dialog:typeTitle("Edited title")
+    dialog:press("quote_position")
+    check.eq(dialog:label("quote_position"), "Quote: custom", "none is followed by custom")
+    check.eq(dialog:getNoteText(), "> First line\n> 第二行\n\nThoughts", "custom starts with editable quoted text and notes")
+    check.eq(dialog:getNoteTitle(), "Edited title", "changing mode while title focused preserves title")
+    dialog:typeText("> Edited quotation\n\nMy layout")
+    dialog:press("quote_position")
+    check.eq(dialog:label("quote_position"), "Quote: below note", "custom cycles back to below")
+    check.eq(dialog:getNoteText(), "Thoughts", "leaving custom restores the plain draft")
+    dialog:typeText("Revised plain draft")
+    for i = 1, 3 do dialog:press("quote_position") end
+    check.eq(dialog:getNoteText(), "> Edited quotation\n\nMy layout", "returning to custom preserves its separate draft")
+    dialog:typeText("")
+    for i = 1, 4 do dialog:press("quote_position") end
+    check.eq(dialog:getNoteText(), "", "an intentionally cleared custom draft stays empty")
+    dialog:press("post")
+    check.eq(#saved, 1, "empty custom content does not save locally")
+    check.eq(plugin.store:queueCount(), 1, "empty custom content is rejected despite the original selection")
+    dialog:typeText("> Edited quotation\n\nMy layout")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[2].body.content, "> Edited quotation\n\nMy layout", "custom posts the edited body without adding anything")
+    check.eq(saved[2], "> Edited quotation\n\nMy layout", "custom saves the edited body verbatim locally")
+    check.eq(plugin.store:get("quote_position"), "none", "a temporary custom choice leaves the default alone")
+    plugin.store:set("quote_position", "custom")
+
+    Actions.addNote(plugin.ctx, opts)
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:label("quote_position"), "Quote: custom", "custom is restored")
+    check.eq(dialog:getNoteText(), "> First line\n> 第二行\n\nThoughts", "a new custom composer starts with a fresh prefill")
+    dialog:press("save_local")
+    dialog:press("post")
+    check.eq(#saved, 2, "share-only custom mode leaves local annotations alone")
+    check.eq(plugin.store:queueCount(), 3, "share-only custom content is queued")
+
+    plugin.store:set("quote_as_blockquote", false)
+    Actions.addNote(plugin.ctx, { quote = "Plain passage", note = "My note" })
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteText(), "Plain passage\n\nMy note", "custom respects the blockquote preference")
+    dialog:press("close")
+    Actions.addNote(plugin.ctx, { note = "No selection" })
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:findButton("quote_position"), nil, "stored custom mode does not expose a quote control without a selection")
+    check.eq(dialog:getNoteText(), "No selection", "ordinary notes gain no custom prefill")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[4].body.content, "No selection", "ordinary notes remain unchanged")
+    plugin.store:set("quote_position", "invalid")
+    Actions.addNote(plugin.ctx, opts)
+    check.eq(Stubs.lastShown("InputDialog"):label("quote_position"), "Quote: below note", "unknown modes fall back to below")
+end
+
+check.section("Selection sharing defaults configure future composers")
+do
+    reset()
+    local plugin = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    local defaults
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == "Selection sharing defaults" then defaults = row.sub_item_table end
+    end
+    check.ok(defaults ~= nil, "sharing defaults are reachable from the top-level settings")
+    local function find(text)
+        for _idx, row in ipairs(defaults) do
+            if row.text == text then return row end
+        end
+        error("Missing default: " .. text)
+    end
+    local quote_items = find("Default quote mode").sub_item_table
+    check.eq(#quote_items, 4, "all four quote modes can be configured")
+    for i, row in ipairs(quote_items) do
+        row.callback()
+        for j, other in ipairs(quote_items) do
+            check.eq(other.checked_func(), i == j, "only the selected quote mode is checked")
+        end
+    end
+    local progress = find("Attach reading progress by default")
+    local local_save = find("Save notes locally by default")
+    check.eq(progress.checked_func(), true, "progress starts enabled")
+    check.eq(local_save.checked_func(), true, "local saving starts enabled")
+    progress.callback()
+    local_save.callback()
+    check.eq(find("Crosspost selected text").checked_func(), false, "selection crossposting is opt-in")
+    for _idx, row in ipairs(plugin:settingsMenu()) do
+        if row.text == "Quote highlights as block quotes" then row.callback() end
+        if row.text_func and row.text_func():find("Default visibility:", 1, true) then
+            row.sub_item_table[2].callback()
+        end
+    end
+    check.eq(Store:new():get("note_save_local"), false, "defaults survive reopening the settings store")
+    local saved = 0
+    local opts = { quote = "Passage", note = "Thoughts", save_note = function()
+        saved = saved + 1
+        return "2026-08-01 09:00:00"
+    end }
+    Actions.addNote(plugin.ctx, opts)
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:label("quote_position"), "Quote: custom", "the selected default quote mode is used")
+    check.eq(dialog:getNoteText(), "Passage\n\nThoughts", "configured quote formatting is used")
+    check.eq(dialog:label("progress"), "At: not attached", "the progress default is used")
+    check.eq(dialog:label("save_local"), "Save locally: off", "the local-save default is used")
+    check.eq(dialog:label("post"), "Share only", "the action matches the local-save default")
+    check.eq(dialog:label("fediverse"), "Crosspost: off", "the crosspost default is used")
+    dialog:press("post")
+    local body = plugin.store:getQueue()[1].body
+    check.eq(saved, 0, "local saving off does not mutate annotations")
+    check.eq(body.progress_type, nil, "disabled progress is omitted from payload")
+    check.eq(body.progress_value, nil, "disabled progress has no value")
+    check.eq(body.visibility, Util.VISIBILITIES[2], "visibility uses the configured default")
+    check.eq(body.post_to_fediverse, false, "crossposting uses the configured default")
+    Actions.addNote(plugin.ctx, opts)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:press("progress")
+    dialog:press("save_local")
+    dialog:press("fediverse")
+    dialog:press("quote_position")
+    dialog:press("post")
+    check.eq(saved, 1, "a per-post override can still save locally")
+    check.ok(plugin.store:getQueue()[2].body.progress_type ~= nil, "a per-post override can attach progress")
+    Actions.addNote(plugin.ctx, opts)
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:label("quote_position"), "Quote: custom", "the next composer retains the configured quote default")
+    check.eq(dialog:label("progress"), "At: not attached", "the next composer retains the progress default")
+    check.eq(dialog:label("save_local"), "Save locally: off", "the next composer retains the local-save default")
+    check.eq(dialog:label("fediverse"), "Crosspost: off", "the next composer retains the crosspost default")
+end
+
+check.section("Title and body are edited together")
+do
+    reset()
+    local plugin = newPlugin()
+    linkBook(plugin)
+    Stubs.online = false
+    plugin.store:set("quote_intro_style", "decorated")
+    plugin.store:set("note_title_style", "decorated")
+    Actions.addNote(plugin.ctx, { title = "Initial title", note = "Initial note", quote = "Passage" })
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "Initial title", "the title field is prefilled independently")
+    check.eq(dialog:getNoteText(), "Initial note", "the body field is prefilled independently")
+    check.eq(dialog:findButton("note_title"), nil, "there is no title submenu button")
+    dialog:typeText("正文第一行。\n正文第二行。")
+    dialog:typeTitle("  关于这段话\n的笔记  ")
+    dialog:press("post")
+    local body = plugin.store:getQueue()[1].body
+    check.eq(body.title, "关于这段话 的笔记", "the title is trimmed and kept on one line")
+    check.eq(body.content, "正文第一行。\n正文第二行。\n\nQuoted passage: 👇\n\n> Passage",
+        "posting while the title is focused still reads the body field")
+
+    Actions.addNote(plugin.ctx, { note = "Untitled note" })
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeTitle("")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[2].body.title, "", "the title remains optional")
+    check.eq(plugin.store:getQueue()[2].body.content, "Untitled note", "untitled notes retain their body")
+
+    Actions.addNote(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:typeTitle("A title without a note")
+    dialog:press("post")
+    check.eq(plugin.store:queueCount(), 2, "a title alone does not bypass empty-note validation")
+    dialog:press("close")
+end
+
+check.section("Default reading-note titles")
+do
+    reset()
+    local plugin, ui = newPlugin{
+        doc_props = { title = "《精神分析的反面》" },
+        percent = 0.1, footer_percent = 0.48,
+    }
+    linkBook(plugin, { title = "Fallback title" })
+    ui.toc = { getTocTitleByPage = function(_, page)
+        check.eq(page, 100, "the title looks up the chapter at the current page")
+        return "主人的话语"
+    end }
+    Stubs.online = false
+    plugin.store:set("quote_intro_style", "decorated")
+    plugin.store:set("note_title_style", "decorated")
+    Actions.addNote(plugin.ctx)
+    local dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "📖 Reading notes | 精神分析的反面 · 主人的话语 · 48%",
+        "the default uses the requested layout and live progress without duplicate book brackets")
+    dialog:typeText("A note.")
+    dialog:press("post")
+    check.eq(plugin.store:getQueue()[1].body.title, dialog:getNoteTitle(),
+        "the generated title is sent to NeoDB")
+
+    ui.view.footer.percent_finished = 0.635
+    ui.toc.getTocTitleByPage = function() return "第三章\n新的章节" end
+    plugin.store:set("progress_unit", "page")
+    Actions.addNote(plugin.ctx, { quote = "Passage" })
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "📖 Reading notes | 精神分析的反面 · 第三章 新的章节 · 64%",
+        "each composer refreshes chapter and percentage even when uploads use page numbers")
+    dialog:press("close")
+
+    ui.doc_props.title = ""
+    ui.toc.getTocTitleByPage = function() return "" end
+    Actions.addNote(plugin.ctx)
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "📖 Reading notes | Fallback title · 64%",
+        "missing chapter is omitted and a missing local title falls back to NeoDB")
+    dialog:press("close")
+
+    Actions.addNote(plugin.ctx, { title = "My chosen title" })
+    dialog = Stubs.lastShown("InputDialog")
+    check.eq(dialog:getNoteTitle(), "My chosen title", "an explicitly supplied title is preserved")
+    dialog:press("close")
+    Actions.addNote(plugin.ctx, { title = "" })
+    check.eq(Stubs.lastShown("InputDialog"):getNoteTitle(), "", "an explicitly blank title is allowed")
+end
+
+check.section("Save a KOReader note and share it")
+do
+    -- These fixtures implement the same save/event interfaces as ReaderHighlight
+    -- and ReaderAnnotation, including clearing a fresh selection on menu close.
+    local function setup(existing, quick, configure)
+        reset()
+        local plugin, ui = newPlugin{ annotations = existing and { existing } or {} }
+        linkBook(plugin, { annotation_sync = { enabled = true, since = "2026-07-01 00:00:00" } })
+        Stubs.online = false
+        plugin.store:set("quote_intro_style", "decorated")
+        plugin.store:set("note_title_style", "decorated")
+        plugin.store:set("selection_crosspost", true)
+        local highlight = ui.highlight
+        highlight.selected_text = Stubs.copy(existing or {
+            text = "Selected text.\n选中文字。", pos0 = "start", pos1 = "end",
+        })
+        highlight.dialog = ui
+        function highlight:onClose() self.selected_text = nil end
+        function highlight:saveHighlight()
+            local item = Stubs.copy(self.selected_text)
+            item.datetime = "2026-08-01 12:00:00"
+            item.drawer = "lighten"
+            item.pageno = 100
+            table.insert(ui.annotation.annotations, item)
+            return #ui.annotation.annotations
+        end
+        function highlight:writePdfAnnotation(action, item, content)
+            self.pdf_write = { action = action, item = item, content = content }
+        end
+        function ui:handleEvent(event)
+            self.last_event = event
+            event.args[1][1].datetime_updated = "2026-08-01 12:01:00"
+        end
+        function ui.annotation:onSaveSettings()
+            ui.doc_settings:saveSetting("annotations", self.annotations)
+        end
+        if configure then configure(plugin, ui) end
+        local factory = highlight.buttons[quick and "15_neodb_highlight" or "14_neodb_note"]
+        check.ok(factory ~= nil, "the selection menu offers the combined action")
+        local button = factory(highlight, existing and 1 or nil)
+        check.eq(button.text, quick and "Highlight & share" or "Add note & share", "the new action has the requested label")
+        button.callback()
+        return plugin, ui, Stubs.lastShown("InputDialog")
+    end
+
+    local plugin, ui, dialog = setup()
+    check.eq(dialog:getInputText(), "", "a new local note starts blank")
+    check.eq(#ui.annotation.annotations, 0, "opening the composer creates no highlight")
+    dialog:typeText("A cancelled draft.")
+    dialog:press("close")
+    check.eq(#ui.annotation.annotations, 0, "cancelling creates no highlight")
+    check.eq(plugin.store:queueCount(), 0, "cancelling posts nothing")
+
+    plugin, ui, dialog = setup()
+    dialog:typeText("My note.\n我的笔记。")
+    dialog:typeTitle("My title")
+    dialog:press("post")
+    local item = ui.annotation.annotations[1]
+    check.eq(#ui.annotation.annotations, 1, "saving creates exactly one annotation")
+    check.eq(item.note, "My note.\n我的笔记。", "the local note contains only the reader's text")
+    check.eq(item.text, "Selected text.\n选中文字。", "the selected passage is kept separately")
+    check.eq(item.pos0, "start", "the original selection start is retained")
+    check.eq(item.pos1, "end", "the original selection end is retained")
+    check.eq(ui.highlight.selected_text, nil, "saving does not revive the temporary selection")
+    check.eq(ui.highlight.pdf_write.content, item.note, "PDF annotation content also contains only the note")
+    check.eq(ui.last_event.handler, "onAnnotationsModified", "KOReader receives an annotation change")
+    check.eq(ui.last_event.args[1].nb_notes_added, 1, "KOReader's note count is updated")
+    check.eq(Stubs.sidecars[BOOK].annotations[1].note, item.note, "the note is persisted before uploading")
+    local op = plugin.store:getQueue()[1]
+    check.eq(op.body.title, "My title", "the combined action sends its inline title to NeoDB")
+    check.eq(op.body.content, "My note.\n我的笔记。\n\nQuoted passage: 👇\n\n> Selected text.\n> 选中文字。",
+        "the offline queue retains the selected quote order")
+    check.eq(op.annotation.key, item.datetime, "the operation is associated with the saved annotation")
+    check.eq(Annotations.queueNew(plugin.ctx), 0, "automatic sync does not duplicate the combined post")
+
+    local existing = annotation{ note = "Existing note.", pos0 = "start", pos1 = "end" }
+    plugin, ui, dialog = setup(existing)
+    check.eq(dialog:getInputText(), "Existing note.", "an existing note is prefilled without a quote")
+    dialog:typeText("Cancelled edit.")
+    dialog:press("close")
+    check.eq(existing.note, "Existing note.", "cancelling leaves the existing note untouched")
+
+    plugin, ui, dialog = setup(existing)
+    dialog:press("save_local")
+    dialog:typeText("Revised note.")
+    dialog:press("post")
+    check.eq(#ui.annotation.annotations, 1, "editing reuses the annotation")
+    check.eq(existing.note, "Revised note.", "the existing note is updated")
+    check.eq(ui.last_event.args[1].nb_notes_added, nil, "editing does not inflate the note count")
+    check.eq(plugin.store:getQueue()[1].body.content, "Revised note.\n\nQuoted passage: 👇\n\n> The spice must flow.",
+        "editing shares the quote below the revised note by default")
+
+    plugin, ui, dialog = setup()
+    Stubs.online = true
     recordCalls(plugin.api, function() return false, "forbidden", 403 end)
-    factory = ui.highlight.buttons["13_neodb_quote"]
-    button = factory({ selected_text = { text = "x" }, onClose = function() end }, 1)
-    button.callback()
-    Stubs.lastShown("InputDialog"):press("Post")
-    check.eq(Annotations.queueNew(plugin.ctx), 1,
-        "a note the server refused is left for the mirror to try again")
+    dialog:typeText("Keep this even if upload fails.")
+    dialog:press("post")
+    check.eq(Stubs.sidecars[BOOK].annotations[1].note, "Keep this even if upload fails.",
+        "a server refusal does not lose the local note")
+    check.eq(plugin.store:queueCount(), 0, "a permanent refusal does not claim to be queued")
+
+    plugin, ui, dialog = setup()
+    ui.highlight.saveHighlight = function() return nil end
+    dialog:typeText("Cannot save.")
+    dialog:press("post")
+    check.eq(plugin.store:queueCount(), 0, "a failed local save prevents sharing")
+    check.eq(dialog:getInputText(), "Cannot save.", "a failed save leaves the draft available")
+
+    plugin, ui, dialog = setup()
+    ui.document = nil
+    dialog:typeText("Wrong book.")
+    dialog:press("post")
+    check.eq(#ui.annotation.annotations, 0, "closing the book prevents saving to the wrong document")
+    check.eq(plugin.store:queueCount(), 0, "closing the book prevents posting")
+
+    check.section("Optional local saving in the combined composer")
+    plugin, ui, dialog = setup()
+    check.eq(dialog:label("save_local"), "Save locally: on", "local saving starts enabled")
+    dialog:typeText("Only on NeoDB.")
+    dialog:press("save_local")
+    check.eq(dialog:label("save_local"), "Save locally: off", "the toggle shows share-only mode")
+    check.eq(dialog:label("post"), "Share only", "the submit button describes share-only mode")
+    check.eq(dialog:getNoteText(), "Only on NeoDB.", "toggling preserves the draft")
+    dialog:press("post")
+    check.eq(#ui.annotation.annotations, 0, "share-only creates no local highlight or note")
+    check.eq(ui.highlight.pdf_write, nil, "share-only does not write a PDF annotation")
+    check.eq(plugin.store:getQueue()[1].annotation, nil, "a bare selection has no annotation key")
+    check.eq(plugin.store:getQueue()[1].body.content,
+        "Only on NeoDB.\n\nQuoted passage: 👇\n\n> Selected text.\n> 选中文字。",
+        "share-only includes the note and quote remotely")
+
+    existing = annotation{ note = "Keep this local note", pos0 = "start", pos1 = "end" }
+    plugin, ui, dialog = setup(existing)
+    dialog:typeText("Different shared note")
+    dialog:press("post")
+    check.eq(existing.note, "Keep this local note", "share-only preserves an existing local note")
+    check.eq(existing.datetime_updated, nil, "share-only leaves local modification time alone")
+    check.eq(#ui.annotation.annotations, 1, "share-only keeps the existing highlight")
+
+    plugin, ui, dialog = setup()
+    dialog:press("save_local")
+    dialog:press("save_local")
+    check.eq(dialog:label("post"), "Save & share", "enabling local saving restores the submit label")
+    dialog:press("post")
+    check.eq(#ui.annotation.annotations, 1, "empty-body sharing saves a highlight when enabled")
+    check.eq(ui.annotation.annotations[1].note, nil, "empty-body sharing creates no empty note")
+    check.eq(ui.last_event.args[1].nb_notes_added, nil, "a plain highlight does not increment note count")
+
+    plugin, ui, dialog = setup()
+    dialog:press("save_local")
+    dialog:press("post")
+    check.eq(#ui.annotation.annotations, 0, "empty-body share-only creates no highlight")
+    check.eq(plugin.store:queueCount(), 1, "empty-body share-only still shares the quote")
+
+    existing = annotation{ note = "> Edited passage\n\nMy custom note", neodb_custom_note = true,
+        pos0 = "start", pos1 = "end" }
+    plugin, ui, dialog = setup(existing, false, function(p) p.store:set("quote_position", "custom") end)
+    check.eq(dialog:getNoteText(), existing.note, "saved custom text is not prefixed with the original quote on reopening")
+    dialog:typeText("> Changed remote quotation\n\nRemote note")
+    dialog:press("post")
+    check.eq(existing.note, "> Edited passage\n\nMy custom note", "sharing an existing custom annotation does not modify it")
+    ui.highlight.selected_text = Stubs.copy(existing)
+    Actions.addNoteAndShare(plugin.ctx, ui.highlight, 1)
+    dialog = Stubs.lastShown("InputDialog")
+    dialog:press("save_local")
+    dialog:typeText("> User-edited quotation\n\nLocally edited note")
+    dialog:press("post")
+    check.eq(existing.neodb_custom_note, true, "explicit custom local save records its editor mode")
+    ui.highlight.selected_text = Stubs.copy(existing)
+    Actions.addNoteAndShare(plugin.ctx, ui.highlight, 1)
+    check.eq(Stubs.lastShown("InputDialog"):getNoteText(), existing.note,
+        "a second reopen preserves edited custom quotations exactly once")
+    existing = annotation{ note = "> The spice must flow.\n\nLegacy custom note", pos0 = "start", pos1 = "end" }
+    plugin, ui, dialog = setup(existing, false, function(p) p.store:set("quote_position", "custom") end)
+    check.eq(dialog:getNoteText(), existing.note, "legacy custom notes without metadata are not duplicated")
+
+
 end
 
 check.section("Annotations: uploading the backlog")
@@ -585,6 +1113,47 @@ do
     local link2 = plugin2.store:getLink(ui2.doc_settings)
     check.eq(link2.annotation_sync.sent.k3.uuid, "note-7", "into its own ledger")
     check.eq(#plugin2.store:get("pending_note_uuids"), 0, "and the stash is emptied")
+end
+
+check.section("Review: failed queued shares release only their own pending markers")
+do
+    reset()
+    local plugin, ui = newPlugin()
+    linkBook(plugin, {annotation_sync = {sent = {key = true, delivered = {uuid = "already-sent"}}}})
+    local op = {method = "POST", path = "/api/me/note/item/item-1/", body = {content = "quote"},
+        annotation = {item = "item-1", key = "key", file = BOOK, release_on_failure = true}}
+    local later = Stubs.copy(op)
+    later.annotation.release_on_failure = false
+    plugin.store:enqueue(later)
+    Annotations.recordFailed(plugin.ctx, op)
+    check.eq(plugin.store:getLink(ui.doc_settings).annotation_sync.sent.key, true,
+        "another queued share keeps the pending marker")
+    check.eq(plugin.store:getQueue()[1].annotation.release_on_failure, true,
+        "remaining share takes ownership of failure cleanup")
+    plugin.store:clearQueue()
+    Annotations.recordFailed(plugin.ctx, later)
+    check.eq(plugin.store:getLink(ui.doc_settings).annotation_sync.sent.key, nil, "last failure releases the marker")
+    op.annotation.key = "delivered"
+    Annotations.recordFailed(plugin.ctx, op)
+    check.eq(plugin.store:getLink(ui.doc_settings).annotation_sync.sent.delivered.uuid, "already-sent",
+        "a failed reshare cannot erase a previous successful post")
+
+    local other = "/books/closed-review.epub"
+    local settings = Stubs.newSidecar(other, {})
+    plugin.store:setLink(settings, {uuid = "other", annotation_sync = {sent = {key = true}}})
+    op.annotation = {item = "other", key = "key", file = other, release_on_failure = true}
+    Annotations.recordFailed(plugin.ctx, op)
+    check.eq(Stubs.sidecars[other].neodb_link.annotation_sync.sent.key, nil,
+        "failure reaches a closed book's sidecar")
+    op.annotation.file = "/books/missing-review.epub"
+    Annotations.recordFailed(plugin.ctx, op)
+    check.eq(plugin.store:get("pending_note_uuids")[1].failed, true, "missing book defers failure cleanup")
+    local reopened = newReaderUI{file = op.annotation.file}
+    local plugin2 = NeoDB:new{ui = reopened}
+    plugin2.store:setLink(reopened.doc_settings, {uuid = "other", annotation_sync = {sent = {key = true}}})
+    Annotations.adoptStashed(plugin2.ctx)
+    check.eq(plugin2.store:getLink(reopened.doc_settings).annotation_sync.sent.key, nil,
+        "reopening a missing book applies deferred cleanup")
 end
 
 check.section("Annotations: deletions")

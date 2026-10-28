@@ -15,7 +15,7 @@ local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local util = require("util")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 
 local Util = require("neodb_util")
 
@@ -574,6 +574,7 @@ function Api:flushQueue()
     if #queue == 0 then return 0, 0, 0 end
 
     local remaining, sent, dropped = {}, 0, 0
+    local failures = {}
     local stopped
     --[[--
     Items whose op was kept for a later attempt. Order matters between ops for
@@ -618,11 +619,20 @@ function Api:flushQueue()
                 -- never succeed (deleted item, item merged away, malformed body).
                 logger.warn("NeoDB: dropping queued op", op.label, "-", tostring(data))
                 dropped = dropped + 1
+                table.insert(failures, { op = op, data = data, code = _code })
             end
         end
     end
 
     self.store:replaceQueue(remaining)
+    -- Run after replacing the queue: failure handlers can see whether another
+    -- pending post still owns the same annotation's queued marker.
+    if self.on_op_failed then
+        for _idx, failure in ipairs(failures) do
+            local ok, err = pcall(self.on_op_failed, failure.op, failure.data, failure.code)
+            if not ok then logger.err("NeoDB: on_op_failed failed:", tostring(err)) end
+        end
+    end
     -- Recorded here rather than at the call sites, so the background path leaves
     -- the same trace the deliberate one does.
     self.store:setLastFlush({

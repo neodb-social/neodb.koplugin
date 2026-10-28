@@ -17,7 +17,7 @@ local Menu = require("ui/widget/menu")
 local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Util = require("neodb_util")
@@ -498,8 +498,10 @@ function Match.showLinkedInfo(ctx)
     end
 
     if link.progress and link.progress.value then
+        local unit = link.progress.type == "page" and _("page number")
+            or (link.progress.type == "percentage" and _("percentage") or tostring(link.progress.type))
         table.insert(lines, T(_("Last progress sent: %1 %2"),
-            tostring(link.progress.value), tostring(link.progress.type)))
+            tostring(link.progress.value), unit))
     end
 
     if url then
