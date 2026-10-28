@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs both harnesses. Give it a lua if the default is not luajit:
+# Runs the behavior, exporter and translation harnesses. Override Lua with:
 #
 #     ./run.sh            # luajit
 #     LUA=lua5.1 ./run.sh
@@ -17,3 +17,7 @@ $LUA harness.lua
 echo
 echo "== harness_exporter.lua (TZ=America/New_York)"
 TZ=America/New_York $LUA harness_exporter.lua
+
+echo
+echo "== harness_i18n.lua"
+$LUA harness_i18n.lua ../*.lua

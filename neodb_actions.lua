@@ -16,14 +16,17 @@ Two habits run through this module:
 
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
+local Event = require("ui/event")
 local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
-local _ = require("gettext")
+local util = require("util")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Login = require("neodb_login")
 local Match = require("neodb_match")
+local NoteDialog = require("neodb_notedialog")
 local Util = require("neodb_util")
 
 --[[--
@@ -822,10 +825,200 @@ end
 
 -- Notes and quotes ----------------------------------------------------------
 
+-- Generate a fresh, editable title at the reading position where the composer
+-- opens. Missing chapter/progress metadata should not leave empty separators.
+local function defaultNoteTitle(ctx, link)
+    local style = ctx.store:get("note_title_style")
+    if style == "none" then return "" end
+    local ui = ctx.ui
+    local function singleLine(text)
+        return Util.trim((text or ""):gsub("%s+", " "))
+    end
+    local book_title = singleLine(ui.doc_props and ui.doc_props.title)
+    if book_title == "" then book_title = singleLine(link.title) end
+    if book_title == "" then book_title = _("Untitled book") end
+    book_title = book_title:match("^《(.*)》$") or book_title
+    local page = ui.getCurrentPage and ui:getCurrentPage()
+    local chapter = page and ui.toc and ui.toc:getTocTitleByPage(page)
+    chapter = singleLine(chapter)
+    local percent = currentPercent(ui, page, pageCount(ui))
+    local progress = percent and tostring(wholePercent(percent)) .. "%" or ""
+    if style == "custom" then
+        local values = { book = book_title, chapter = chapter, progress = progress }
+        return singleLine((ctx.store:get("note_title_template") or ""):gsub("{(%w+)}", function(key)
+            return values[key] or "{" .. key .. "}"
+        end))
+    end
+    local title
+    if style == "plain" or style == "decorated" then
+        title = T(style == "decorated" and _("📖 Reading notes | %1") or _("Reading notes | %1"), book_title)
+    elseif style == "book" or style == "book_chapter" or style == "book_progress" then
+        title = T(_("Book: %1"), book_title)
+    else
+        return ""
+    end
+    if style ~= "book" and style ~= "book_progress" and chapter ~= "" then
+        title = T(_("%1 · %2"), title, chapter)
+    end
+    if style ~= "book" and style ~= "book_chapter" and progress ~= "" then
+        title = title .. " · " .. progress
+    end
+    return title
+end
+
+local function quoteWithIntroduction(ctx, quote)
+    local style = ctx.store:get("quote_intro_style")
+    if style == "plain" then return _("Quoted passage:") .. "\n\n" .. quote end
+    if style == "decorated" then return _("Quoted passage: 👇") .. "\n\n" .. quote end
+    if style == "excerpt" then return _("Excerpt:") .. "\n\n" .. quote end
+    if style == "original" then return _("Original text:") .. "\n\n" .. quote end
+    if style == "from_book" then return _("From the book:") .. "\n\n" .. quote end
+    if style == "custom" then
+        local intro = Util.trim(ctx.store:get("quote_intro_text") or "")
+        if intro ~= "" then return intro .. "\n\n" .. quote end
+    end
+    return quote
+end
+
+-- One tap, no composer, color picker or network prompt. Save locally first,
+-- durably enqueue the post, then use the existing silent upload/retry path.
+function Actions.highlightAndShare(ctx, highlight, index)
+    local selection = highlight.selected_text
+    if not selection or not selection.pos0 or not selection.pos1 then return end
+    local quote = Util.trim(util.cleanupSelectedText(selection.text or ""))
+    if quote == "" then return end
+    local saved = index and ctx.ui.annotation.annotations[index] or nil
+    if not saved and not index then
+        local new_index = highlight:saveHighlight()
+        saved = new_index and ctx.ui.annotation.annotations[new_index]
+    end
+    highlight:onClose()
+    if not saved then
+        Util.notify(index and _("The original highlight is no longer available. Please select the text again.")
+            or _("Could not save the highlight. Please select the text again."))
+        return
+    end
+    ctx.ui.annotation:onSaveSettings()
+
+    -- These prerequisites cannot be fixed without opening an interactive flow.
+    -- Keep the highlight and report the missing setup without launching one.
+    if not ctx.store:isLoggedIn() then
+        Util.notify(_("Highlight saved. Sign in from the NeoDB menu before sharing."))
+        return
+    end
+    local link = ctx.store:getLink(ctx.ui.doc_settings)
+    if not link then
+        Util.notify(_("Highlight saved. Link this book from the NeoDB menu before sharing."))
+        return
+    end
+    if ctx.store:get("quote_as_blockquote") then
+        quote = "> " .. quote:gsub("\n", "\n> ")
+    end
+    local progress_type, value = Actions.readingPosition(ctx)
+    local op = {
+        method = "POST",
+        path = ctx.api:notePath(link.uuid),
+        label = T(_("Note on “%1”"), link.title or "?"),
+        body = {
+            title = defaultNoteTitle(ctx, link),
+            content = quoteWithIntroduction(ctx, quote),
+            visibility = ctx.store:get("default_visibility"),
+            post_to_fediverse = ctx.store:get("selection_crosspost"),
+            sensitive = false,
+        },
+        annotation = {
+            item = link.uuid,
+            key = saved.datetime,
+            file = ctx.ui.document.file,
+        },
+    }
+    if ctx.store:get("note_attach_progress") then
+        op.body.progress_type = progress_type
+        op.body.progress_value = tostring(value)
+    end
+    local marked = annotations().markQueued(ctx, saved.datetime)
+    op.annotation.release_on_failure = marked
+    op.notify_result = true
+    local status, data, code = ctx.api:submit(op, false)
+    if status == "failed" then
+        if marked then annotations().unmarkQueued(ctx, saved.datetime) end
+        Util.notify(T(_("Highlight saved, but sharing could not be queued: %1"), ctx.api:errorMessage(data, code)))
+        return
+    end
+    Util.notify(_("Highlight saved; sharing queued."))
+    UIManager:nextTick(function() Actions.flushSoon(ctx) end)
+end
+
+-- Keep the selection separately: closing its menu clears it, and cancelling the
+-- composer must not create a highlight or alter an existing note.
+function Actions.addNoteAndShare(ctx, highlight, index)
+    local selection = util.tableDeepCopy(highlight.selected_text)
+    local saved = index and ctx.ui.annotation.annotations[index] or nil
+    if not selection or not selection.pos0 or not selection.pos1 then return end
+    local document = ctx.ui.document
+    highlight:onClose()
+
+    Actions.addNote(ctx, {
+        quote = util.cleanupSelectedText(selection.text),
+        note = saved and saved.note or "",
+        annotation_key = saved and saved.datetime or nil,
+        existing_annotation = saved ~= nil,
+        custom_note = saved and saved.neodb_custom_note,
+        save_note = function(note, mode)
+            if ctx.ui.document ~= document then
+                Util.alert(_("The book was closed. The note could not be saved."))
+                return
+            end
+            if saved then
+                local present = false
+                for _, item in ipairs(ctx.ui.annotation.annotations) do
+                    if item == saved then present = true; break end
+                end
+                if not present then
+                    Util.alert(_("The original highlight was deleted. The note could not be saved."))
+                    return
+                end
+            else
+                -- Use KOReader's normal save path for both EPUB and PDF. Do not
+                -- extend to a sentence: share exactly the passage selected.
+                local previous_selection = highlight.selected_text
+                highlight.selected_text = selection
+                local new_index = highlight:saveHighlight()
+                highlight.selected_text = previous_selection
+                saved = new_index and ctx.ui.annotation.annotations[new_index]
+                if not saved then
+                    Util.alert(_("Could not save the note. Please select the text again."))
+                    return
+                end
+            end
+
+            local had_note = saved.note ~= nil and saved.note ~= ""
+            local has_note = note ~= ""
+            highlight:writePdfAnnotation("content", saved, note)
+            saved.note = has_note and note or nil
+            saved.neodb_custom_note = has_note and mode == "custom" or nil
+            local note_delta = (has_note and 1 or 0) - (had_note and 1 or 0)
+            ctx.ui:handleEvent(Event:new("AnnotationsModified", {
+                saved,
+                nb_highlights_added = note_delta ~= 0 and -note_delta or nil,
+                nb_notes_added = note_delta ~= 0 and note_delta or nil,
+            }))
+            UIManager:setDirty(highlight.dialog, "ui")
+            -- Use the reader's annotation save lifecycle; do not force a full
+            -- document settings flush for every selection.
+            ctx.ui.annotation:onSaveSettings()
+            return saved.datetime
+        end,
+    })
+end
+
 --[[--
 Note composer, also used for sharing a highlighted quote.
 
 @param opts.quote          highlighted text to quote
+@param opts.note           initial note text, without the quote
+@param opts.save_note      optional callback saving the local note and returning
+                           its annotation key; nil means saving failed
 @param opts.title          suggested note title
 @param opts.annotation_key creation time of the annotation being shared, when the
                            quote came from one the book already holds. It is what
@@ -837,19 +1030,36 @@ function Actions.addNote(ctx, opts)
     opts = opts or {}
     Actions.requireLink(ctx, function(link)
         local progress_type, value, total = Actions.readingPosition(ctx)
-        local attach_progress = true
+        local attach_progress = ctx.store:get("note_attach_progress")
         local visibility = ctx.store:get("default_visibility")
-        local post = ctx.store:get("post_to_fediverse")
-        local note_title = opts.title or ""
+        local post = ctx.store:get(opts.quote and "selection_crosspost" or "post_to_fediverse")
+        local save_local = opts.save_note ~= nil and not opts.existing_annotation
+            and ctx.store:get("note_save_local")
 
-        local prefill = ""
-        if opts.quote and opts.quote ~= "" then
-            local quote = Util.trim(opts.quote)
-            if ctx.store:get("quote_as_blockquote") then
-                quote = "> " .. quote:gsub("\n", "\n> ")
+        local quote = Util.trim(opts.quote or "")
+        local quote_modes = { after = "before", before = "none", none = "custom", custom = "after" }
+        local quote_position = ctx.store:get("quote_position")
+        if not quote_modes[quote_position] then quote_position = "after" end
+        if quote == "" then quote_position = "none" end
+        local plain_draft = opts.note or ""
+        local custom_draft
+        local function customDraft()
+            if custom_draft == nil then
+                local editable_quote = quote
+                if ctx.store:get("quote_as_blockquote") then
+                    editable_quote = "> " .. quote:gsub("\n", "\n> ")
+                end
+                -- Old versions saved the whole custom body without metadata.
+                -- Recognize an existing prefill too, so reopening is idempotent.
+                local initial = Util.trim(plain_draft)
+                if opts.custom_note or initial == editable_quote
+                        or initial:sub(1, #editable_quote + 2) == editable_quote .. "\n\n" then
+                    custom_draft = plain_draft
+                else
+                    custom_draft = editable_quote .. "\n\n" .. plain_draft
+                end
             end
-            -- Cursor lands after the quote, ready for the reader's own thought.
-            prefill = quote .. "\n\n"
+            return custom_draft
         end
 
         local dialog
@@ -858,20 +1068,31 @@ function Actions.addNote(ctx, opts)
                 and T(_("At: %1"), Actions.positionLabel(progress_type, value, total))
                 or _("At: not attached")
         end
-        local function titleLabel()
-            return note_title ~= ""
-                and T(_("Title: %1"), Util.ellipsize(note_title, 20))
-                or _("Title: none")
+        local function quoteLabel()
+            local labels = {
+                after = _("Quote: below note"),
+                before = _("Quote: above note"),
+                none = _("Quote: none"),
+                custom = _("Quote: custom"),
+            }
+            return labels[quote_position]
+        end
+        local function saveLocalLabel()
+            return save_local and _("Save locally: on") or _("Save locally: off")
+        end
+        local function postLabel()
+            if not opts.save_note then return _("Post") end
+            return save_local and _("Save & share") or _("Share only")
         end
 
-        dialog = InputDialog:new{
-            title = opts.quote and _("Share a quote") or _("Add a note"),
+        local dialog_config = {
+            title = opts.save_note and _("Add note & share")
+                or (opts.quote and _("Share a quote") or _("Add a note")),
             description = T(_("On “%1”"), Util.ellipsize(link.title or "?", 40)),
-            input = prefill,
-            input_hint = opts.quote and _("Add your thoughts (optional)") or _("Your note"),
-            allow_newline = true,
-            use_available_height = true,
-            cursor_at_end = true,
+            note_title = opts.title or defaultNoteTitle(ctx, link),
+            note_text = quote_position == "custom" and customDraft() or plain_draft,
+            note_hint = opts.quote
+                and _("Note text (optional)") or _("Note text"),
             -- No scroll buttons: they would be injected into our first button
             -- row. Swipe north/south scrolls the text box anyway.
             buttons = {
@@ -882,38 +1103,6 @@ function Actions.addNote(ctx, opts)
                         callback = function()
                             attach_progress = not attach_progress
                             relabel(dialog, "progress", progressLabel())
-                        end,
-                    },
-                    {
-                        text = titleLabel(),
-                        id = "note_title",
-                        callback = function()
-                            -- Two keyboards at once is a state KOReader does not
-                            -- track, so the note's has to go before this one opens.
-                            hideKeyboard(dialog)
-                            local title_dialog
-                            title_dialog = InputDialog:new{
-                                title = _("Note title"),
-                                input = note_title,
-                                buttons = {{
-                                    {
-                                        text = _("Cancel"),
-                                        id = "close",
-                                        callback = function() UIManager:close(title_dialog) end,
-                                    },
-                                    {
-                                        text = _("Set"),
-                                        is_enter_default = true,
-                                        callback = function()
-                                            note_title = Util.trim(title_dialog:getInputText())
-                                            UIManager:close(title_dialog)
-                                            relabel(dialog, "note_title", titleLabel())
-                                        end,
-                                    },
-                                }},
-                            }
-                            UIManager:show(title_dialog)
-                            title_dialog:onShowKeyboard()
                         end,
                     },
                 },
@@ -947,12 +1136,39 @@ function Actions.addNote(ctx, opts)
                         callback = function() UIManager:close(dialog) end,
                     },
                     {
-                        text = _("Post"),
+                        text = postLabel(),
+                        id = "post",
                         callback = function()
-                            local content = Util.trim(dialog:getInputText())
-                            if content == "" then
+                            local note_title = Util.trim(dialog:getNoteTitle())
+                            local note = Util.trim(dialog:getNoteText())
+                            local automatic_quote = quote ~= ""
+                                and (quote_position == "before" or quote_position == "after")
+                            if note == "" and not automatic_quote then
                                 Util.alert(_("The note is empty."))
                                 return
+                            end
+                            local key = opts.annotation_key
+                            if save_local then
+                                key = opts.save_note(note, quote_position)
+                                if not key then return end
+                            end
+                            -- Automatic modes append a separate quote. Custom
+                            -- mode posts the edited content as-is; local saving,
+                            -- if enabled, also saves exactly this editor text.
+                            local content = note
+                            if automatic_quote then
+                                local formatted_quote = quote
+                                if ctx.store:get("quote_as_blockquote") then
+                                    formatted_quote = "> " .. quote:gsub("\n", "\n> ")
+                                end
+                                formatted_quote = quoteWithIntroduction(ctx, formatted_quote)
+                                if note == "" then
+                                    content = formatted_quote
+                                elseif quote_position == "after" then
+                                    content = note .. "\n\n" .. formatted_quote
+                                else
+                                    content = formatted_quote .. "\n\n" .. note
+                                end
                             end
                             UIManager:close(dialog)
 
@@ -982,7 +1198,6 @@ function Actions.addNote(ctx, opts)
                             handed over *before* the write, since the mirror's
                             timer comes round long before a queued post does.
                             ]]
-                            local key = opts.annotation_key
                             local marked = false
                             if type(key) == "string" then
                                 op.annotation = {
@@ -991,6 +1206,7 @@ function Actions.addNote(ctx, opts)
                                     file = ctx.ui.document and ctx.ui.document.file,
                                 }
                                 marked = annotations().markQueued(ctx, key)
+                                op.annotation.release_on_failure = marked
                             end
 
                             local function finish(status, data, code)
@@ -1015,6 +1231,39 @@ function Actions.addNote(ctx, opts)
                 },
             },
         }
+        if quote ~= "" then
+            table.insert(dialog_config.buttons[1], {
+                text = quoteLabel(),
+                id = "quote_position",
+                callback = function()
+                    if quote_position == "custom" then
+                        custom_draft = dialog:getNoteText()
+                    else
+                        plain_draft = dialog:getNoteText()
+                    end
+                    local previous = quote_position
+                    quote_position = quote_modes[quote_position]
+                    if quote_position == "custom" then
+                        dialog:setNoteText(customDraft())
+                    elseif previous == "custom" then
+                        dialog:setNoteText(plain_draft)
+                    end
+                    relabel(dialog, "quote_position", quoteLabel())
+                end,
+            })
+        end
+        if opts.save_note then
+            table.insert(dialog_config.buttons, #dialog_config.buttons, {{
+                text = saveLocalLabel(),
+                id = "save_local",
+                callback = function()
+                    save_local = not save_local
+                    relabel(dialog, "save_local", saveLocalLabel())
+                    relabel(dialog, "post", postLabel())
+                end,
+            }})
+        end
+        dialog = NoteDialog:new(dialog_config)
         UIManager:show(dialog)
         dialog:onShowKeyboard()
     end)

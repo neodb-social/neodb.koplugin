@@ -171,6 +171,7 @@ and colour filters.
 | `neodb_annotations.lua` | Mirroring KOReader's own highlights and notes to NeoDB |
 | `neodb_exporter.lua` | NeoDB as a target in KOReader's "Export highlights" |
 | `neodb_util.lua` | ISBN checksums, star rendering, JSON-null scrubbing, helpers |
+| `neodb_i18n.lua`, `neodb_zh_cn.lua` | Plugin-local localization and generated Simplified Chinese catalog |
 | `spec/` | Tests, and the KOReader stubs they run against |
 
 Sibling modules are `neodb_`-prefixed because KOReader puts every plugin
@@ -183,7 +184,8 @@ with another plugin's.
 ./spec/run.sh
 ```
 
-Two harnesses run, `spec/harness.lua` and `spec/harness_exporter.lua`, against
+Three harnesses run, `spec/harness.lua`, `spec/harness_exporter.lua` and
+`spec/harness_i18n.lua`, against
 the KOReader stubs in `spec/stubs.lua`. No device and no network are involved.
 A failing check prints expected against actual and the run exits non-zero, so it
 works as a commit hook.
@@ -212,13 +214,14 @@ is a `NONE` sentinel in `spec/harness.lua` for "this field is absent".
 
 ## What CI adds
 
-`.github/workflows/test.yml` runs both harnesses on every push and pull request,
+`.github/workflows/test.yml` runs all three harnesses on every push and pull request,
 plus two gates the harnesses cannot cover:
 
 - every module is compiled, which catches one added and not wired in yet;
-- `G_reader_settings` is grepped for outside `neodb_exporter.lua`. It is a
-  global, so compiling proves nothing about it, and only the exporter may touch
-  it: it keeps its switch in KOReader's own settings.
+- `G_reader_settings` is grepped for outside `neodb_exporter.lua` and
+  `neodb_notedialog.lua`. The exporter keeps its switch in KOReader's settings;
+  the note dialog only reads the native virtual keyboard preference. Other
+  plugin settings stay in the plugin store.
 
 `.github/workflows/release.yml` builds `neodb.koplugin.zip` when a release is
 published: the Lua modules and the licence only, inside an already correctly
@@ -275,3 +278,40 @@ time out after 25 seconds. Anything that can be reached from a page turn, from
 closing a book or from a timer therefore only *queues*, and the queue is drained
 at moments where a pause is acceptable. `Util.busy` paints its message before the
 call starts, otherwise the screen simply freezes with no explanation.
+
+## Translations
+
+Edit `l10n/zh_CN.po` using a PO editor, then run
+`python3 scripts/build-translations.py` (requires GNU gettext's `msgfmt`).
+`neodb_zh_cn.lua` is a generated runtime file; it keeps installation independent
+of Python and gettext tooling. Release packaging includes this generated module.
+
+Missing translations produce warnings in the harness and fall back to English.
+Incorrect translation placeholders still fail tests. `--check` on the generator
+checks that the committed runtime catalog matches the PO source; it does not
+require translations for newly introduced source strings. Labels are cached per
+language so normal rendering does not repeatedly allocate lookup tables.
+
+The note editor uses KOReader v2026.07.1 widget internals only for its optimized
+layout. A guarded resize falls back to a standard InputDialog and a title button,
+preserving both drafts. Test the fallback with a forced resize exception as well
+as normal keyboard resizing. Simulator checks do not establish e-ink flash behavior.
+
+Run the optional widget smoke test from a KOReader installation directory, with
+an isolated temporary profile (never your normal KOReader settings directory):
+
+```sh
+NEODB_UI_TEST_DIR=$(mktemp -d)
+export NEODB_UI_TEST_DIR
+KO_HOME="$NEODB_UI_TEST_DIR" NEODB_PLUGIN_DIR=/path/to/neodb.koplugin \
+NEODB_UI_LANGUAGE=zh_CN SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software \
+EMULATE_READER_W=600 EMULATE_READER_H=800 \
+./luajit /path/to/neodb.koplugin/spec/smoke_notedialog.lua
+```
+
+Repeat with `NEODB_UI_LANGUAGE=C` for English. Screenshots are saved in the
+isolated profile. The test injects resize failures, verifies draft preservation,
+and exercises the standard editor's title button and keyboard reinitialization.
+It also checks taps with the virtual keyboard enabled/disabled, touch-only input,
+cursor preservation, and header dragging in both the two-field and fallback
+editors. Drag bounds must follow changes to the frame's height.

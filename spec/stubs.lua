@@ -194,6 +194,12 @@ end
 
 modules["ffi/util"] = { template = template }
 
+modules["ui/event"] = {
+    new = function(_self, name, ...)
+        return { handler = "on" .. name, args = { ... } }
+    end,
+}
+
 modules["util"] = {
     trim = function(text)
         if text == nil then return nil end
@@ -577,6 +583,22 @@ modules["ui/widget/inputdialog"] = widgetClass("InputDialog", function(widget)
     function widget:getInputText() return self.typed end
     function widget:setInputText(text) self.typed = text end
     function widget:typeText(text) self.typed = text end
+    function widget:onShowKeyboard() self.keyboard = true end
+    function widget:onCloseKeyboard() self.keyboard = false end
+end)
+
+-- Model the composer's two independent values; layout and keyboard reflow are
+-- exercised with KOReader's actual widgets in the local UI smoke check.
+modules["neodb_notedialog"] = widgetClass("InputDialog", function(widget)
+    pressable(widget)
+    widget.typed = widget.note_text or ""
+    widget.typed_title = widget.note_title or ""
+    function widget:getInputText() return self.title_focused and self.typed_title or self.typed end
+    function widget:getNoteText() return self.typed end
+    function widget:setNoteText(text) self.typed = text end
+    function widget:getNoteTitle() return (self.typed_title:gsub("[\r\n]+", " ")) end
+    function widget:typeText(text) self.typed = text end
+    function widget:typeTitle(text) self.typed_title = text; self.title_focused = true end
     function widget:onShowKeyboard() self.keyboard = true end
     function widget:onCloseKeyboard() self.keyboard = false end
 end)

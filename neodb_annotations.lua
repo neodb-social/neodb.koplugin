@@ -32,7 +32,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local DocSettings = require("docsettings")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Actions = require("neodb_actions")
@@ -409,6 +409,7 @@ local function stash(ctx, entry)
     -- same note, reported again.
     for i = 1, #list do
         if list[i].item == entry.item and list[i].key == entry.key then
+            if entry.failed and not list[i].failed then return end
             list[i] = entry
             ctx.store:set(STASH_KEY, list)
             return
@@ -466,6 +467,35 @@ function Annotations.recordSent(ctx, op, data)
     logger.dbg("NeoDB: stashed a note uuid until its book turns up again")
 end
 
+-- A refused queued share may belong to a closed or temporarily missing book.
+-- Release only our pending boolean, never another successful post's UUID.
+function Annotations.recordFailed(ctx, op)
+    local tag = op.annotation
+    if type(tag) ~= "table" or not tag.release_on_failure then return end
+    for _idx, pending_op in ipairs(ctx.store:getQueue()) do
+        local pending_tag = pending_op.annotation
+        if pending_tag and pending_tag.key == tag.key and pending_tag.item == tag.item
+                and pending_tag.file == tag.file then
+            pending_tag.release_on_failure = true
+            ctx.store:replaceQueue(ctx.store:getQueue())
+            return
+        end
+    end
+    local ok, filed = pcall(function()
+        local book = linkedBook(ctx, tag.file, tag.item)
+        if not book then return false end
+        local sent = sentTable(book.state)
+        if sent[tag.key] == true then
+            sent[tag.key] = nil
+            book.state.sent = sent
+            saveState(ctx, book)
+        end
+        return true
+    end)
+    if ok and filed then return end
+    stash(ctx, { item = tag.item, key = tag.key, file = tag.file, failed = true })
+end
+
 --[[--
 Files any stashed uuids belonging to the book that has just opened.
 
@@ -482,8 +512,12 @@ function Annotations.adoptStashed(ctx)
     local keep, adopted = {}, 0
     for _idx, entry in ipairs(list) do
         if type(entry) == "table" and entry.item == book.link.uuid
-            and type(entry.key) == "string" then
-            sent[entry.key] = { uuid = entry.uuid, at = entry.at }
+            and type(entry.key) == "string" and (not entry.file or entry.file == book.file) then
+            if entry.failed then
+                if sent[entry.key] == true then sent[entry.key] = nil end
+            else
+                sent[entry.key] = { uuid = entry.uuid, at = entry.at }
+            end
             adopted = adopted + 1
         else
             table.insert(keep, entry)

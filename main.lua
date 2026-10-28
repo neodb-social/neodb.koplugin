@@ -27,7 +27,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 local util = require("util")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Actions = require("neodb_actions")
@@ -153,6 +153,14 @@ function NeoDB:init()
     ]]
     self.api.on_op_sent = function(op, data)
         Annotations.recordSent(self.ctx, op, data)
+        if op.notify_result then Util.notify(_("Highlight shared on NeoDB.")) end
+    end
+
+    self.api.on_op_failed = function(op, data, code)
+        Annotations.recordFailed(self.ctx, op)
+        if op.notify_result then
+            Util.notify(T(_("Sharing failed: %1. The local highlight was kept."), self.api:errorMessage(data, code)))
+        end
     end
 
     self:onDispatcherRegisterActions()
@@ -248,31 +256,26 @@ end
 -- Highlight menu ------------------------------------------------------------
 
 --[[--
-Adds "Share on NeoDB" to the text selection menu.
+Adds sharing and saving a local note to the text selection menu.
 
 Sharing a quote is the one action worth reaching from inside the text, and the
 highlight menu is where the reader already is when they have something to say.
 ]]
 function NeoDB:addHighlightAction()
     if not self.ui.highlight then return end
-    self.ui.highlight:addToHighlightDialog("13_neodb_quote", function(this, index)
+    self.ui.highlight:addToHighlightDialog("14_neodb_note", function(this, index)
         return {
-            text = _("Share on NeoDB"),
+            text = _("Add note & share"),
             callback = function()
-                local text = util.cleanupSelectedText(this.selected_text.text)
-                --[[--
-                An `index` means this is not a fresh selection but a highlight the
-                book already holds, reached through the edit dialog's "…" button.
-                The mirror is watching that one, so the composer has to say which
-                annotation it is posting or both of them will post it.
-                ]]
-                local shared = index and self.ui.annotation
-                    and self.ui.annotation.annotations[index] or nil
-                this:onClose()
-                Actions.addNote(self.ctx, {
-                    quote = text,
-                    annotation_key = type(shared) == "table" and shared.datetime or nil,
-                })
+                Actions.addNoteAndShare(self.ctx, this, index)
+            end,
+        }
+    end)
+    self.ui.highlight:addToHighlightDialog("15_neodb_highlight", function(this, index)
+        return {
+            text = _("Highlight & share"),
+            callback = function()
+                Actions.highlightAndShare(self.ctx, this, index)
             end,
         }
     end)
@@ -759,6 +762,102 @@ function NeoDB:settingsMenu()
         })
     end
 
+    local quote_items = {}
+    local quote_modes = {
+        { key = "after", text = _("Quote: below note") },
+        { key = "before", text = _("Quote: above note") },
+        { key = "none", text = _("Quote: none") },
+        { key = "custom", text = _("Quote: custom") },
+    }
+    for _idx, mode in ipairs(quote_modes) do
+        table.insert(quote_items, {
+            text = mode.text,
+            radio = true,
+            checked_func = function() return store:get("quote_position") == mode.key end,
+            callback = function() store:set("quote_position", mode.key) end,
+        })
+    end
+    local function styleItems(key)
+        local is_title = key == "note_title_style"
+        local items = {}
+        local styles = {
+            { key = "none", text = _("None") },
+            { key = "plain", text = _("Plain text") },
+            { key = "decorated", text = _("With emoji") },
+        }
+        local extra = is_title and {
+            { key = "book", text = _("Book title only") },
+            { key = "book_chapter", text = _("Book title and chapter") },
+            { key = "book_progress", text = _("Book title and progress") },
+        } or {
+            { key = "excerpt", text = _("Excerpt:") },
+            { key = "original", text = _("Original text:") },
+            { key = "from_book", text = _("From the book:") },
+        }
+        for _idx, style in ipairs(extra) do table.insert(styles, style) end
+        for _idx, style in ipairs(styles) do
+            table.insert(items, {
+                text = style.text, radio = true,
+                checked_func = function() return store:get(key) == style.key end,
+                callback = function() store:set(key, style.key) end,
+            })
+        end
+        table.insert(items, {
+            text = _("Custom…"), radio = true, keep_menu_open = true,
+            checked_func = function() return store:get(key) == "custom" end,
+            callback = function(menu)
+                local text_key = is_title and "note_title_template" or "quote_intro_text"
+                local editor
+                editor = InputDialog:new{
+                    title = is_title and _("Custom title template") or _("Custom quote introduction"),
+                    description = is_title
+                        and _("Use {book}, {chapter} and {progress}. Missing metadata becomes empty text.")
+                        or _("Placed before the quotation, whether the quotation is above or below your note."),
+                    input = store:get(text_key) or "", allow_newline = not is_title,
+                    buttons = {{
+                        { text = _("Cancel"), callback = function() UIManager:close(editor) end },
+                        { text = _("Save"), id = "save", callback = function()
+                            store:set(text_key, editor:getInputText())
+                            store:set(key, "custom")
+                            UIManager:close(editor)
+                            if menu then menu:updateItems() end
+                        end },
+                    }},
+                }
+                UIManager:show(editor)
+                editor:onShowKeyboard()
+            end,
+        })
+        return items
+    end
+    local sharing_defaults = {
+        {
+            text = _("Default quote mode"),
+            sub_item_table = quote_items,
+        },
+        {
+            text = _("Attach reading progress by default"),
+            checked_func = function() return store:get("note_attach_progress") end,
+            callback = function() store:toggle("note_attach_progress") end,
+        },
+        {
+            text = _("Save notes locally by default"),
+            help_text = _("Applies to new selections. Sharing an existing annotation starts with local saving off. Highlight & share always saves a highlight."),
+            checked_func = function() return store:get("note_save_local") end,
+            callback = function() store:toggle("note_save_local") end,
+        },
+        {
+            text = _("Crosspost selected text"),
+            help_text = _("Only applies to Add note & share and Highlight & share. Other posts use the global crossposting setting."),
+            checked_func = function() return store:get("selection_crosspost") end,
+            callback = function() store:toggle("selection_crosspost") end,
+        },
+        { text = _("Automatic note title"), sub_item_table = styleItems("note_title_style") },
+        { text = _("Quote introduction"),
+            help_text = _("Placed before the quotation, whether the quotation is above or below your note."),
+            sub_item_table = styleItems("quote_intro_style") },
+    }
+
     return {
         {
             text_func = function()
@@ -766,6 +865,23 @@ function NeoDB:settingsMenu()
                     Util.visibilityLabel(store:get("default_visibility")))
             end,
             sub_item_table = visibility_items,
+        },
+        {
+            text = _("Quote highlights as block quotes"),
+            help_text = _("Prefixes shared highlights with \"> \" so they read as a quotation."),
+            checked_func = function() return store:get("quote_as_blockquote") end,
+            callback = function() store:toggle("quote_as_blockquote") end,
+        },
+        {
+            text = _("Crosspost to connected social networks"),
+            help_text = _("Ratings, notes and comments are always saved to NeoDB. This also announces them to your followers."),
+            checked_func = function() return store:get("post_to_fediverse") end,
+            callback = function() store:toggle("post_to_fediverse") end,
+        },
+        {
+            text = _("Selection sharing defaults"),
+            help_text = _("Initial choices when sharing selected text. Changes in the composer apply only to that post. Global visibility and quote formatting are configured separately."),
+            sub_item_table = sharing_defaults,
         },
         {
             text_func = function()
@@ -834,18 +950,6 @@ function NeoDB:settingsMenu()
             help_text = _("When you reach the last page of a linked book, set its NeoDB status to Finished."),
             checked_func = function() return store:get("auto_mark_finished") end,
             callback = function() store:toggle("auto_mark_finished") end,
-        },
-        {
-            text = _("Quote highlights as block quotes"),
-            help_text = _("Prefixes shared highlights with \"> \" so they read as a quotation."),
-            checked_func = function() return store:get("quote_as_blockquote") end,
-            callback = function() store:toggle("quote_as_blockquote") end,
-        },
-        {
-            text = _("Crosspost to connected social networks"),
-            help_text = _("Ratings, notes and comments are always saved to NeoDB. This also announces them to your followers."),
-            checked_func = function() return store:get("post_to_fediverse") end,
-            callback = function() store:toggle("post_to_fediverse") end,
         },
         {
             text = _("Crosspost shared highlights"),

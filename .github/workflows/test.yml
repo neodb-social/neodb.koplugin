@@ -11,8 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install luajit
-        run: sudo apt-get update && sudo apt-get install -y luajit
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y luajit gettext
 
       # Every module is loaded by the harness, but this catches one that has been
       # added and not wired in yet.
@@ -23,15 +23,18 @@ jobs:
             luajit -b "$file" /dev/null
           done
 
-      # G_reader_settings is a global, so compiling proves nothing about it. Only
-      # the exporter may touch it: it keeps its switch in KOReader's own settings.
-      - name: Check nothing else reaches for G_reader_settings
+      # Only the exporter stores a switch in KOReader's settings. The note
+      # dialog reads KOReader's keyboard preference to match native text input.
+      - name: Check global settings access stays in the exporter and note dialog
         run: |
           set -eu
-          if grep -l "G_reader_settings" *.lua | grep -v "^neodb_exporter.lua$"; then
-            echo "G_reader_settings used outside neodb_exporter.lua" >&2
+          if grep -l "G_reader_settings" *.lua | grep -Ev "^neodb_(exporter|notedialog).lua$"; then
+            echo "G_reader_settings used outside exporter or note dialog" >&2
             exit 1
           fi
+
+      - name: Check generated translations
+        run: python3 scripts/build-translations.py --check
 
       - name: Run the harnesses
         run: ./spec/run.sh

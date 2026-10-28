@@ -26,21 +26,28 @@ local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local Device = require("device")
 local logger = require("logger")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Api = require("neodb_api")
 local Util = require("neodb_util")
 
 --- Public instances listed in the NeoDB documentation. "Other" covers the rest.
-local KNOWN_INSTANCES = {
-    { host = "neodb.social",   note = _("flagship, zh/en") },
-    { host = "eggplant.place", note = _("development build, en") },
-    { host = "reviewdb.app",   note = _("en") },
-    { host = "minreol.dk",     note = _("da") },
-    { host = "db.casually.cat", note = _("en") },
-    { host = "neodb.kevga.de", note = _("de") },
-}
+local knownInstances_language, knownInstances_cache
+local function knownInstances()
+    local language = require("gettext").current_lang
+    if knownInstances_language == language and knownInstances_cache then return knownInstances_cache end
+    knownInstances_language = language
+    knownInstances_cache = {
+        { host = "neodb.social",   note = _("flagship, zh/en") },
+        { host = "eggplant.place", note = _("development build, en") },
+        { host = "reviewdb.app",   note = _("en") },
+        { host = "minreol.dk",     note = _("da") },
+        { host = "db.casually.cat", note = _("en") },
+        { host = "neodb.kevga.de", note = _("de") },
+    }
+    return knownInstances_cache
+end
 
 local TOKEN_FILENAME = "neodb_token.txt"
 
@@ -104,7 +111,7 @@ function Login.chooseInstance(ctx, on_done)
     local menu
     local items = {}
 
-    for _idx, entry in ipairs(KNOWN_INSTANCES) do
+    for _idx, entry in ipairs(knownInstances()) do
         table.insert(items, {
             text = entry.host,
             mandatory = entry.note,
