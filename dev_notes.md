@@ -183,7 +183,8 @@ with another plugin's.
 ./spec/run.sh
 ```
 
-Two harnesses run, `spec/harness.lua` and `spec/harness_exporter.lua`, against
+Three harnesses run, `spec/harness.lua`, `spec/harness_exporter.lua` and
+`spec/harness_i18n.lua`, against
 the KOReader stubs in `spec/stubs.lua`. No device and no network are involved.
 A failing check prints expected against actual and the run exits non-zero, so it
 works as a commit hook.
@@ -212,7 +213,7 @@ is a `NONE` sentinel in `spec/harness.lua` for "this field is absent".
 
 ## What CI adds
 
-`.github/workflows/test.yml` runs both harnesses on every push and pull request,
+`.github/workflows/test.yml` runs all three harnesses on every push and pull request,
 plus two gates the harnesses cannot cover:
 
 - every module is compiled, which catches one added and not wired in yet;
@@ -275,3 +276,16 @@ time out after 25 seconds. Anything that can be reached from a page turn, from
 closing a book or from a timer therefore only *queues*, and the queue is drained
 at moments where a pause is acceptable. `Util.busy` paints its message before the
 call starts, otherwise the screen simply freezes with no explanation.
+
+## Translations
+
+Edit `l10n/zh_CN.po` using a PO editor, then run
+`python3 scripts/build-translations.py` (requires GNU gettext's `msgfmt`).
+`neodb_zh_cn.lua` is a generated runtime file; it keeps installation independent
+of Python and gettext tooling. Release packaging includes this generated module.
+
+Missing translations produce warnings in the harness and fall back to English.
+Incorrect translation placeholders still fail tests. `--check` on the generator
+checks that the committed runtime catalog matches the PO source; it does not
+require translations for newly introduced source strings. Labels are cached per
+language so normal rendering does not repeatedly allocate lookup tables.

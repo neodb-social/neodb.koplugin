@@ -32,7 +32,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local DocSettings = require("docsettings")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 local T = require("ffi/util").template
 
 local Actions = require("neodb_actions")

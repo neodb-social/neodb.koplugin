@@ -14,6 +14,11 @@ Link the book you are reading to its entry on a NeoDB server, then keep your sta
 
 ## Install
 
+The interface follows KOReader's language setting. Simplified Chinese is
+translated locally; English remains the source language. Other languages use
+KOReader's available translations. The plugin does not modify the reader's
+global translation table. Restart KOReader after changing its interface language.
+
 **From a plugin store**, which handles updates afterwards: search for **NeoDB** in [Storefront](https://github.com/ultimatejimmy/storefront.koplugin) or [AppStore](https://github.com/omer-faruq/appstore.koplugin).
 
 **Manually**: download `neodb.koplugin.zip` from [the latest release](https://github.com/neodb-social/neodb.koplugin/releases/latest) and unzip it into KOReader's `plugins` folder. The zip already holds a correctly named folder, so there is nothing to rename.

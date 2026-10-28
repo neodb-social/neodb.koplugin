@@ -15,7 +15,7 @@ local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local util = require("util")
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 
 local Util = require("neodb_util")
 

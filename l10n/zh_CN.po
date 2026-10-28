@@ -1,0 +1,975 @@
+# Simplified Chinese translations for NeoDB for KOReader.
+msgid ""
+msgstr "Project-Id-Version: neodb.koplugin\nReport-Msgid-Bugs-To: https://github.com/neodb-social/neodb.koplugin/issues\nPOT-Creation-Date: 2026-10-28 00:00+0100\nPO-Revision-Date: 2026-10-28 00:00+0100\nLast-Translator: NeoDB contributors\nLanguage-Team: Simplified Chinese\nLanguage: zh_CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=1; plural=0;\n"
+
+msgid "%1 book(s) not linked"
+msgstr "%1 本书尚未关联"
+
+msgid "%1 failed and discarded"
+msgstr "%1 项失败，已丢弃"
+
+msgid "%1 highlight(s) could not be matched up"
+msgstr "%1 条高亮无法匹配"
+
+msgid "%1 more to go — upload again once these are sent."
+msgstr "还有 %1 项；请等这些上传完成后再次上传。"
+
+msgid "%1 pages"
+msgstr "%1 页"
+
+msgid "%1 still to go — export again once these have uploaded"
+msgstr "还有 %1 条；请等这些上传完成后再次导出"
+
+msgid "%1 still waiting"
+msgstr "还有 %1 项待上传"
+
+msgid "%1 upload(s) could not be sent and were given up on."
+msgstr "有 %1 项上传失败，已放弃重试。"
+
+msgid "%1 uploaded"
+msgstr "已上传 %1 项"
+
+msgid "%1 waiting, but the upload queue is full — upload it first, under Tools → NeoDB → Uploads"
+msgstr "还有 %1 条待上传，但队列已满；请先在“工具 → NeoDB → 上传”中完成上传"
+
+msgid "%1%"
+msgstr "%1%"
+
+msgid "%1: %2"
+msgstr "%1：%2"
+
+msgid "About this plugin"
+msgstr "关于本插件"
+
+msgid "Access token"
+msgstr "访问令牌"
+
+msgid "Account: %1"
+msgstr "账号：%1"
+
+msgid "Add a note"
+msgstr "添加笔记"
+
+msgid "Add note"
+msgstr "添加笔记"
+
+msgid "Add note…"
+msgstr "添加笔记…"
+
+msgid "Add your thoughts (optional)"
+msgstr "添加你的想法（可选）"
+
+msgid "Address of the service used for QR code sign-in. Leave empty to turn that option off."
+msgstr "二维码登录所用的服务地址。留空可关闭此选项。"
+
+msgid "Announces each shared highlight to your followers as well."
+msgstr "同时向关注者发布每一条分享的高亮。"
+
+msgid "Anything waiting to upload is sent quietly whenever the device goes online, whatever put it online. This never turns Wi-Fi on by itself and never interrupts you. With this off, uploads wait until you open a book or send them from the Uploads menu."
+msgstr "设备联网后，静默上传所有排队内容，无论因何联网。不会自行打开 Wi-Fi，也不会打断阅读。关闭后，待上传内容会等到打开书籍或在“上传”菜单中手动发送时上传。"
+
+msgid "As %1"
+msgstr "以 %1 的身份"
+
+msgid "Asking NeoDB about that link…"
+msgstr "正在向 NeoDB 查询此链接…"
+
+msgid "At: %1"
+msgstr "进度：%1"
+
+msgid "At: not attached"
+msgstr "进度：不附带"
+
+msgid "Authorization code"
+msgstr "授权验证码"
+
+msgid "Authorization link"
+msgstr "授权链接"
+
+msgid "Authorize in a browser"
+msgstr "在浏览器中授权"
+
+msgid "Automatic"
+msgstr "自动"
+
+msgid "Book details"
+msgstr "书籍详情"
+
+msgid "By %1"
+msgstr "作者：%1"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Check connection"
+msgstr "检查连接"
+
+msgid "Checking your NeoDB login…"
+msgstr "正在检查 NeoDB 登录状态…"
+
+msgid "Choose your NeoDB instance"
+msgstr "选择你的 NeoDB 实例"
+
+msgid "Close"
+msgstr "关闭"
+
+msgid "Collecting your sign-in…"
+msgstr "正在获取登录信息…"
+
+msgid "Comment (optional)"
+msgstr "短评（选填）"
+
+msgid "Comment: %1"
+msgstr "短评：%1"
+
+msgid "Connected to %1 as %2."
+msgstr "已以 %2 的身份连接到 %1。"
+
+msgid "Contacting NeoDB…"
+msgstr "正在连接 NeoDB…"
+
+msgid "Continue"
+msgstr "继续"
+
+msgid "Copy link to clipboard"
+msgstr "复制链接到剪贴板"
+
+msgid "Could not mark as Finished: too many uploads are waiting."
+msgstr "无法标记为“已读”：待上传内容过多。"
+
+msgid "Could not reach the NeoDB server."
+msgstr "无法连接到 NeoDB 服务器。"
+
+msgid "Could not read your NeoDB status"
+msgstr "无法读取你的 NeoDB 状态"
+
+msgid "Could not register with %1.\n\n%2"
+msgstr "无法向 %1 注册。\n\n%2"
+
+msgid "Could not sign in with that code. Codes expire quickly — try requesting a new one."
+msgstr "无法使用此验证码登录。验证码有效期很短，请重新申请。"
+
+msgid "Could not start sign-in with %1.\n\n%2"
+msgstr "无法通过 %1 开始登录。\n\n%2"
+
+msgid "Create a token at %1/developer/ and type it here."
+msgstr "请在 %1/developer/ 创建令牌，然后在此输入。"
+
+msgid "Crosspost shared highlights"
+msgstr "将分享的高亮同步发布到社交网络"
+
+msgid "Crosspost to connected social networks"
+msgstr "同步发布到已连接的社交网络"
+
+msgid "Crosspost: off"
+msgstr "同步发布：关"
+
+msgid "Crosspost: on"
+msgstr "同步发布：开"
+
+msgid "Crossposting shared highlights is on, so your followers will see all of them."
+msgstr "高亮的同步发布已开启，你的关注者会看到全部内容。"
+
+msgid "Default visibility: %1"
+msgstr "默认可见范围：%1"
+
+msgid "Defaults for a new book"
+msgstr "新书默认设置"
+
+msgid "Delete highlight from “%1”"
+msgstr "删除《%1》中的高亮"
+
+msgid "Deletes your status, rating and comment for this book from NeoDB. The book stays linked."
+msgstr "从 NeoDB 删除本书的阅读状态、评分和短评。书籍关联仍会保留。"
+
+msgid "Discard"
+msgstr "丢弃"
+
+msgid "Discard %1 pending upload(s)?"
+msgstr "丢弃 %1 项待上传内容？"
+
+msgid "Discard pending uploads…"
+msgstr "丢弃待上传内容…"
+
+msgid "Discarded %1 pending upload(s) that belonged to the previous account."
+msgstr "已丢弃属于上一账号的 %1 项待上传内容。"
+
+msgid "Done — I've signed in"
+msgstr "完成，我已登录"
+
+msgid "Dropped"
+msgstr "弃读"
+
+msgid "Each book gets this question one time."
+msgstr "每本书只会询问一次。"
+
+msgid "Enter a page number."
+msgstr "请输入页码。"
+
+msgid "Enter a percentage between 0 and 100."
+msgstr "请输入 0 到 100 之间的百分比。"
+
+msgid "Enter a server address myself"
+msgstr "手动输入服务器地址"
+
+msgid "Enter the address of your NeoDB server, for example neodb.social"
+msgstr "请输入 NeoDB 服务器地址，例如 neodb.social"
+
+msgid "Every highlight and note you then make in that book is posted to NeoDB as a note."
+msgstr "将此后在本书中创建的每条高亮和笔记作为笔记分享到 NeoDB。"
+
+msgid "Everything else here needs an account to talk to."
+msgstr "其他功能需要先登录账号。"
+
+msgid "Find book"
+msgstr "查找书籍"
+
+msgid "Find by title or author…"
+msgstr "按书名或作者查找…"
+
+msgid "Find this book on NeoDB?"
+msgstr "在 NeoDB 上查找本书？"
+
+msgid "Find this book on NeoDB…"
+msgstr "在 NeoDB 上查找本书…"
+
+msgid "Finished"
+msgstr "已读"
+
+msgid "Followers only"
+msgstr "仅关注者"
+
+msgid "Highlight from “%1”"
+msgstr "《%1》中的高亮"
+
+msgid "I have the code"
+msgstr "我已获得验证码"
+
+msgid "ISBN %1"
+msgstr "ISBN：%1"
+
+msgid "Last progress sent: %1 %2"
+msgstr "上次发送的进度：%1 %2"
+
+msgid "Link"
+msgstr "关联"
+
+msgid "Link by URL"
+msgstr "通过链接关联"
+
+msgid "Link by URL…"
+msgstr "通过链接关联…"
+
+msgid "Link copied."
+msgstr "已复制链接。"
+
+msgid "Link this book to:\n\n%1"
+msgstr "将本书关联到：\n\n%1"
+
+msgid "Linked NeoDB book"
+msgstr "已关联的 NeoDB 书籍"
+
+msgid "Linked to another instance"
+msgstr "已关联到其他实例"
+
+msgid "Linked to “%1”"
+msgstr "已关联到《%1》"
+
+msgid "Linked, status not synced"
+msgstr "已关联，状态尚未同步"
+
+msgid "Links the book you are reading to a NeoDB instance, so you can set its reading status and progress, and share notes, quotes, ratings and comments."
+msgstr "将当前阅读的书籍关联到 NeoDB 实例，以便设置阅读状态和进度，并分享笔记、引文、评分和短评。"
+
+msgid "Look up"
+msgstr "查询"
+
+msgid "Looking up ISBN %1 on NeoDB…"
+msgstr "正在 NeoDB 上查询 ISBN %1…"
+
+msgid "Mark as Finished at the end of a book"
+msgstr "读到书末时标记为“已读”"
+
+msgid "Mark removed from NeoDB."
+msgstr "已从 NeoDB 移除标记。"
+
+msgid "Mark “%1” as %2"
+msgstr "将《%1》标记为“%2”"
+
+msgid "Mark “%1” as Finished"
+msgstr "将《%1》标记为“已读”"
+
+msgid "Marked as %1 on NeoDB."
+msgstr "已在 NeoDB 上标记为“%1”。"
+
+msgid "Marked as Finished on NeoDB."
+msgstr "已在 NeoDB 上标记为“已读”。"
+
+msgid "More results (page %1 of %2)…"
+msgstr "更多结果（第 %1 页，共 %2 页）…"
+
+msgid "NeoDB"
+msgstr "NeoDB"
+
+msgid "NeoDB access token"
+msgstr "NeoDB 访问令牌"
+
+msgid "NeoDB already has every highlight in there."
+msgstr "这些书籍的所有高亮都已分享到 NeoDB。"
+
+msgid "NeoDB already has every highlight in this book."
+msgstr "本书的所有高亮都已分享到 NeoDB。"
+
+msgid "NeoDB did not accept your login. Please sign in again."
+msgstr "NeoDB 未接受你的登录信息，请重新登录。"
+
+msgid "NeoDB for KOReader\n\nVersion: %1\nInstance: %2\nAccount: %3\n\nMarks, notes and progresses are saved to your NeoDB account. Anything made while offline is queued and uploaded next time you are online."
+msgstr "KOReader 的 NeoDB 插件\n\n版本：%1\n实例：%2\n账号：%3\n\n标记、笔记和阅读进度会保存到你的 NeoDB 账号。离线操作会加入队列，并在下次联网时上传。"
+
+msgid "NeoDB instance"
+msgstr "NeoDB 实例"
+
+msgid "NeoDB is a free open-sourced software and a distributed community, somewhat similar to Goodreads, but instead of being a single commercial service holding everyone's data, NeoDB is a network of self-hosted servers that interconnected via open protocols like ActivityPub and ATProto. You may use NeoDB to share your reading journey with friends on Mastodon and Bluesky, or use it purely for private reading log, as NeoDB's privacy setup supports both.\n\nLearn more at %1"
+msgstr "NeoDB 是一个免费的开源软件和分布式社区，类似于 Goodreads。但它并非由单一商业服务保管所有人的数据，而是由自行托管的服务器组成，通过 ActivityPub、ATProto 等开放协议互相连接。你可以在 NeoDB 上与 Mastodon 和 Bluesky 的朋友分享阅读历程，也可以只用它记录私人的阅读日志，两种用途都有相应的隐私设置。\n\n了解更多：%1"
+
+msgid "NeoDB is rate-limiting us. Please try again in a minute."
+msgstr "NeoDB 限制了请求频率，请稍后重试。"
+
+msgid "NeoDB is still importing that page. Try again in a moment."
+msgstr "NeoDB 仍在导入该页面，请稍后重试。"
+
+msgid "NeoDB rating: %1 (%2 ratings)"
+msgstr "NeoDB 评分：%1（%2 人评分）"
+
+msgid "NeoDB refused this request. Your token may lack write access."
+msgstr "NeoDB 拒绝了此请求。你的访问令牌可能缺少写入权限。"
+
+msgid "NeoDB request failed (HTTP %d)."
+msgstr "NeoDB 请求失败（HTTP %d）。"
+
+msgid "NeoDB request failed."
+msgstr "NeoDB 请求失败。"
+
+msgid "NeoDB uploads are paused: sign in again to send them."
+msgstr "NeoDB 上传已暂停：请重新登录后发送。"
+
+msgid "NeoDB: %1 result(s)"
+msgstr "NeoDB：%1 条结果"
+
+msgid "NeoDB: add note"
+msgstr "NeoDB：添加笔记"
+
+msgid "NeoDB: book actions"
+msgstr "NeoDB：本书操作"
+
+msgid "NeoDB: post something"
+msgstr "NeoDB：发布动态"
+
+msgid "NeoDB: update reading progress"
+msgstr "NeoDB：更新阅读进度"
+
+msgid "No NeoDB instance configured."
+msgstr "尚未配置 NeoDB 实例。"
+
+msgid "No network connection."
+msgstr "没有网络连接。"
+
+msgid "No pairing service is configured."
+msgstr "尚未配置配对服务。"
+
+msgid "No rating"
+msgstr "未评分"
+
+msgid "No token file found.\n\nCreate an access token at %1/developer/, save it as a text file named %2, and copy it to either of these locations:\n\n%3\n\nThen try again."
+msgstr "未找到令牌文件。\n\n请在 %1/developer/ 创建访问令牌，将其保存为名为 %2 的文本文件，并复制到以下任一位置：\n\n%3\n\n然后重试。"
+
+msgid "None of those books are linked to NeoDB."
+msgstr "这些书籍都尚未关联到 NeoDB。"
+
+msgid "Not found on NeoDB."
+msgstr "在 NeoDB 上未找到。"
+
+msgid "Not marked"
+msgstr "未标记"
+
+msgid "Not on any NeoDB shelf yet"
+msgstr "尚未加入任何 NeoDB 书架"
+
+msgid "Not signed in"
+msgstr "未登录"
+
+msgid "Not this book"
+msgstr "本书不用"
+
+msgid "Note on “%1”"
+msgstr "《%1》的笔记"
+
+msgid "Note posted to NeoDB."
+msgstr "笔记已发布到 NeoDB。"
+
+msgid "Note title"
+msgstr "笔记标题"
+
+msgid "Nothing on NeoDB matched “%1”."
+msgstr "NeoDB 上没有与“%1”匹配的结果。"
+
+msgid "Nothing there to post to NeoDB."
+msgstr "没有可发布到 NeoDB 的内容。"
+
+msgid "Nothing waiting to upload."
+msgstr "没有待上传内容。"
+
+msgid "On NeoDB: %1"
+msgstr "NeoDB 状态：%1"
+
+msgid "On “%1”"
+msgstr "关于《%1》"
+
+msgid "Open the authorization page on your phone or computer, sign in, and approve access.\n\nNeoDB will then show you a short code. Come back here and tap \"I have the code\"."
+msgstr "请在手机或电脑上打开授权页面，登录并允许访问。\n\nNeoDB 随后会显示一个简短的验证码。请返回此处点击“我已获得验证码”。"
+
+msgid "Other instance…"
+msgstr "其他实例…"
+
+msgid "Page number"
+msgstr "页码"
+
+msgid "Page numbers for fixed-layout files and for EPUBs with publisher page numbers; percentage otherwise, since reflowed page numbers differ on every device."
+msgstr "固定版式文件及带出版页码的 EPUB 使用页码；其他文件使用百分比，因为重排版后的页码会因设备而异。"
+
+msgid "Pairing service"
+msgstr "配对服务"
+
+msgid "Pairing service: %1"
+msgstr "配对服务：%1"
+
+msgid "Paste a NeoDB book link, or a link from a site NeoDB can import from."
+msgstr "粘贴 NeoDB 书籍链接，或 NeoDB 支持导入的网站链接。"
+
+msgid "Paused: NeoDB asked us to slow down. Try again in a minute."
+msgstr "已暂停：NeoDB 要求降低请求频率。请稍后重试。"
+
+msgid "Paused: NeoDB did not accept your login. Sign in again to send these."
+msgstr "已暂停：NeoDB 未接受你的登录信息。请重新登录后上传。"
+
+msgid "Paused: the NeoDB server could not be reached."
+msgstr "已暂停：无法连接到 NeoDB 服务器。"
+
+msgid "Pending change"
+msgstr "待上传的更改"
+
+msgid "Pending uploads discarded."
+msgstr "已丢弃待上传内容。"
+
+msgid "Percentage"
+msgstr "百分比"
+
+msgid "Post"
+msgstr "发布"
+
+msgid "Post %1 highlights and notes from “%2” to NeoDB?\n\nEach one becomes a separate note, and they cannot be taken back from here."
+msgstr "将《%2》中的 %1 条高亮和笔记发布到 NeoDB？\n\n每条内容都会成为一篇独立笔记，无法在此撤回。"
+
+msgid "Post anyway"
+msgstr "仍然发布"
+
+msgid "Post highlights to NeoDB whenever you export them?\n\nEach highlight NeoDB has not already been told about becomes a separate note on your account, at your default visibility, and cannot be taken back from here.\n\nOnly books linked to a NeoDB entry are touched, whether or not their own upload switch is on."
+msgstr "每次导出高亮时，都将其发布到 NeoDB？\n\n尚未分享到 NeoDB 的每条高亮都会成为你账号上的一篇独立笔记，使用默认可见范围，且无法在此撤回。\n\n仅处理已关联到 NeoDB 条目的书籍，不受各书籍的自动上传开关影响。"
+
+msgid "Post something…"
+msgstr "发布动态…"
+
+msgid "Post them"
+msgstr "发布全部"
+
+msgid "Post to NeoDB"
+msgstr "发布到 NeoDB"
+
+msgid "Post: %1"
+msgstr "动态：%1"
+
+msgid "Posted to NeoDB."
+msgstr "已发布到 NeoDB。"
+
+msgid "Posting note…"
+msgstr "正在发布笔记…"
+
+msgid "Posting…"
+msgstr "正在发布…"
+
+msgid "Posts every highlight and note NeoDB has not already been told about, each as its own note on that book's linked NeoDB entry.\n\nOnly books linked to a NeoDB entry are touched, whether or not their own \"Upload new highlights and notes\" switch is on. Books that are not linked are skipped."
+msgstr "上传所有尚未分享到 NeoDB 的高亮和笔记，每条内容都会成为对应书籍条目下的一篇独立笔记。\n\n仅处理已关联到 NeoDB 条目的书籍，不受各书籍“上传新增高亮和笔记”开关影响。未关联的书籍将被跳过。"
+
+msgid "Posts every highlight and note in this book that NeoDB has not been told about, however long ago you made it. Works whether the per-book switch under “Settings for this book” is on or not."
+msgstr "上传本书中所有尚未分享到 NeoDB 的高亮和笔记，无论创建于何时。“本书设置”中的自动上传开关不影响此操作。"
+
+msgid "Posts every highlight and note you make in this book from now on to NeoDB, quietly and without asking: the passage, whatever you wrote about it, and where in the book it is. What the book already holds is left alone."
+msgstr "从现在起，自动将本书中新增的高亮和笔记分享到 NeoDB，包括引文、你写的笔记和阅读位置。过程静默，无需确认；已有的高亮和笔记不受影响。"
+
+msgid "Prefixes shared highlights with \"> \" so they read as a quotation."
+msgstr "在分享的高亮文字前加上“> ”，使其显示为引用块。"
+
+msgid "Private"
+msgstr "私密"
+
+msgid "Progress for “%1”"
+msgstr "《%1》的阅读进度"
+
+msgid "Progress goes out every hour while you read, and when the book is closed, whenever the position moved. It is queued quietly; nothing turns on Wi-Fi."
+msgstr "阅读时每小时，以及关闭书籍时，如阅读位置发生变化，便更新进度。上传会静默排队，不会自动打开 Wi-Fi。"
+
+msgid "Progress sent: %1"
+msgstr "已更新进度：%1"
+
+msgid "Progress unit: %1"
+msgstr "进度单位：%1"
+
+msgid "Progress: %1"
+msgstr "进度：%1"
+
+msgid "Public"
+msgstr "公开"
+
+msgid "Quote highlights as block quotes"
+msgstr "将高亮格式化为引用块"
+
+msgid "Rate & comment"
+msgstr "评分与短评"
+
+msgid "Rate and comment…"
+msgstr "评分与短评…"
+
+msgid "Rate “%1”"
+msgstr "为《%1》评分"
+
+msgid "Rating: %1"
+msgstr "评分：%1"
+
+msgid "Ratings, notes and comments are always saved to NeoDB. This also announces them to your followers."
+msgstr "评分、笔记和短评都会保存到 NeoDB。开启此项后，还会将其发布给你的关注者。"
+
+msgid "Read a token from a file"
+msgstr "从文件读取令牌"
+
+msgid "Reading"
+msgstr "在读"
+
+msgid "Reading your NeoDB status for this book…"
+msgstr "正在读取本书在 NeoDB 上的状态…"
+
+msgid "Reading your NeoDB status…"
+msgstr "正在读取你的 NeoDB 状态…"
+
+msgid "Refresh book info from NeoDB"
+msgstr "从 NeoDB 刷新书籍信息"
+
+msgid "Refresh from NeoDB"
+msgstr "从 NeoDB 刷新"
+
+msgid "Registering KOReader with the server…"
+msgstr "正在向服务器注册 KOReader…"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Remove mark…"
+msgstr "移除标记…"
+
+msgid "Remove your NeoDB mark for “%1”?\n\nThe rating, comment and status will be deleted."
+msgstr "移除《%1》在 NeoDB 上的标记？\n\n评分、短评和阅读状态都会被删除。"
+
+msgid "Removing…"
+msgstr "正在移除…"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Save anyway"
+msgstr "仍然保存"
+
+msgid "Saved to NeoDB."
+msgstr "已保存到 NeoDB。"
+
+msgid "Saved — will upload when you're online."
+msgstr "已保存，将在联网后上传。"
+
+msgid "Scan a QR code (easiest)"
+msgstr "扫描二维码（最方便）"
+
+msgid "Scan this with your phone, or open:\n\n%1\n\nChoose your NeoDB server and sign in there, then come back and tap Done."
+msgstr "请用手机扫码，或打开：\n\n%1\n\n选择你的 NeoDB 服务器并登录，然后返回此处点击“完成”。"
+
+msgid "Search"
+msgstr "搜索"
+
+msgid "Search NeoDB for a book"
+msgstr "在 NeoDB 上搜索书籍"
+
+msgid "Search with different words…"
+msgstr "更换关键词搜索…"
+
+msgid "Searching NeoDB for “%1”…"
+msgstr "正在 NeoDB 上搜索“%1”…"
+
+msgid "Send"
+msgstr "发送"
+
+msgid "Sending progress…"
+msgstr "正在发送进度…"
+
+msgid "Sending to NeoDB…"
+msgstr "正在发送到 NeoDB…"
+
+msgid "Sends where you are in this book to NeoDB every hour while you read, and when the book is closed — whenever the position moved. Queued quietly; nothing turns on Wi-Fi."
+msgstr "阅读时每小时，以及关闭本书时，如阅读位置发生变化，便向 NeoDB 更新进度。上传会静默排队，不会自动打开 Wi-Fi。"
+
+msgid "Set"
+msgstr "设置"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Settings for this book"
+msgstr "本书设置"
+
+msgid "Share a quote"
+msgstr "分享引文"
+
+msgid "Share on NeoDB"
+msgstr "分享到 NeoDB"
+
+msgid "Show QR code"
+msgstr "显示二维码"
+
+msgid "Show linked book"
+msgstr "查看已关联的书籍"
+
+msgid "Show the link as text"
+msgstr "以文字显示链接"
+
+msgid "Sign in"
+msgstr "登录"
+
+msgid "Sign in again"
+msgstr "重新登录"
+
+msgid "Sign in to %1\n\nHow would you like to do it?"
+msgstr "登录 %1\n\n请选择登录方式。"
+
+msgid "Sign in to NeoDB\n\nHow would you like to do it?"
+msgstr "登录 NeoDB\n\n请选择登录方式。"
+
+msgid "Sign in to NeoDB first, under Tools → NeoDB."
+msgstr "请先在“工具 → NeoDB”中登录。"
+
+msgid "Sign in to NeoDB…"
+msgstr "登录 NeoDB…"
+
+msgid "Sign out"
+msgstr "退出登录"
+
+msgid "Sign out of NeoDB?"
+msgstr "退出 NeoDB 登录？"
+
+msgid "Sign out of NeoDB?\n\n%1 pending upload(s) will be discarded."
+msgstr "退出 NeoDB 登录？\n\n将丢弃 %1 项待上传内容。"
+
+msgid "Signed in as %1"
+msgstr "已以 %1 的身份登录"
+
+msgid "Signed in to NeoDB as %1."
+msgstr "已以 %1 的身份登录 NeoDB。"
+
+msgid "Signed out of NeoDB."
+msgstr "已退出 NeoDB 登录。"
+
+msgid "Signing in…"
+msgstr "正在登录…"
+
+msgid "Starting sign-in…"
+msgstr "正在开始登录…"
+
+msgid "Status on NeoDB: %1"
+msgstr "NeoDB 状态：%1"
+
+msgid "Status unknown — never synced"
+msgstr "状态未知，尚未同步"
+
+msgid "Status: %1"
+msgstr "状态：%1"
+
+msgid "Status: not known yet (never synced)."
+msgstr "状态：未知（尚未同步）。"
+
+msgid "Stop asking"
+msgstr "不再询问"
+
+msgid "Suggest to link with NeoDB (only once per book)"
+msgstr "提示关联 NeoDB（每本书仅一次）"
+
+msgid "Tags: %1"
+msgstr "标签：%1"
+
+msgid "That does not look like a server address."
+msgstr "这似乎不是有效的服务器地址。"
+
+msgid "That link is a %1, not a book."
+msgstr "此链接对应的是 %1，而非书籍。"
+
+msgid "That sign-in hasn't finished yet.\n\nFinish on your phone, then tap Done again."
+msgstr "登录尚未完成。\n\n请先在手机上完成登录，再次点击“完成”。"
+
+msgid "The NeoDB server reported an error."
+msgstr "NeoDB 服务器返回错误。"
+
+msgid "The NeoDB server sent something unexpected."
+msgstr "NeoDB 服务器返回了无法识别的内容。"
+
+msgid "The NeoDB server took too long to answer."
+msgstr "NeoDB 服务器响应超时。"
+
+msgid "The note is empty."
+msgstr "笔记内容为空。"
+
+msgid "The pairing service did not return a usable sign-in."
+msgstr "配对服务未返回有效的登录信息。"
+
+msgid "The post is empty."
+msgstr "动态内容为空。"
+
+msgid "These apply to a book that NeoDB does not know yet. The last two set what the link dialog offers, and each book then keeps its own answer, under “Settings for this book”."
+msgstr "这些设置适用于尚未关联到 NeoDB 的书籍。后两项决定关联窗口中的默认选项，此后每本书会保留自己的设置，可在“本书设置”中修改。"
+
+msgid "This book has %1 pages."
+msgstr "本书共有 %1 页。"
+
+msgid "This book is linked to a different NeoDB instance.\n\nFind it on the one you're signed in to?"
+msgstr "本书已关联到其他 NeoDB 实例。\n\n要在当前登录的实例上查找吗？"
+
+msgid "This book is linked to a different NeoDB server. Finding it again links it to the one you are signed in to."
+msgstr "本书已关联到另一台 NeoDB 服务器。重新查找可将其关联到当前登录的服务器。"
+
+msgid "This book is not linked to NeoDB yet."
+msgstr "本书尚未关联到 NeoDB。"
+
+msgid "This book is not linked to NeoDB."
+msgstr "本书未关联到 NeoDB。"
+
+msgid "This book isn't linked"
+msgstr "本书尚未关联"
+
+msgid "This book isn't linked to a NeoDB entry yet.\n\nFind it now?"
+msgstr "本书尚未关联到 NeoDB 条目。\n\n现在查找吗？"
+
+msgid "This book isn't on a NeoDB shelf yet; saving will mark it as Reading."
+msgstr "本书尚未加入 NeoDB 书架；保存后会标记为“在读”。"
+
+msgid "This device has not been told what NeoDB holds for this book.\n\nSaving now would replace any rating and comment you made elsewhere."
+msgstr "此设备尚未获取本书在 NeoDB 上的记录。\n\n现在保存会覆盖你在其他地方设置的评分和短评。"
+
+msgid "This post is %1 characters long. Most NeoDB servers accept %2.\n\nPost it anyway?"
+msgstr "这条动态有 %1 个字符，大多数 NeoDB 服务器最多接受 %2 个。\n\n仍要发布吗？"
+
+msgid "This sign-in link has expired or was already used.\n\nStart again to get a fresh one."
+msgstr "此登录链接已过期或已被使用。\n\n请重新开始以获取新链接。"
+
+msgid "Title, author, or ISBN."
+msgstr "书名、作者或 ISBN。"
+
+msgid "Title: %1"
+msgstr "标题：%1"
+
+msgid "Title: none"
+msgstr "标题：无"
+
+msgid "Too many uploads are already waiting. Upload them first, under Tools → NeoDB → Uploads."
+msgstr "待上传内容过多。请先在“工具 → NeoDB → 上传”中完成上传。"
+
+msgid "Translated by %1"
+msgstr "译者：%1"
+
+msgid "Type an access token"
+msgstr "手动输入访问令牌"
+
+msgid "Type the code NeoDB showed you after you approved access."
+msgstr "请输入允许访问后 NeoDB 显示的验证码。"
+
+msgid "Unit: page"
+msgstr "单位：页码"
+
+msgid "Unit: percent"
+msgstr "单位：百分比"
+
+msgid "Unlink"
+msgstr "取消关联"
+
+msgid "Unlink this book from “%1”?\n\nYour NeoDB marks are not touched."
+msgstr "取消本书与《%1》的关联？\n\n你的 NeoDB 标记不会受到影响。"
+
+msgid "Unlink this book…"
+msgstr "取消本书关联…"
+
+msgid "Unlinked from NeoDB."
+msgstr "已取消与 NeoDB 的关联。"
+
+msgid "Unlisted"
+msgstr "不公开列出"
+
+msgid "Unlisted posts are not shown in public timelines."
+msgstr "不公开列出的动态不会显示在公共时间线上。"
+
+msgid "Untitled"
+msgstr "无标题"
+
+msgid "Update progress"
+msgstr "更新进度"
+
+msgid "Update progress (%1)"
+msgstr "更新进度（%1）"
+
+msgid "Update progress automatically"
+msgstr "自动更新阅读进度"
+
+msgid "Update reading progress"
+msgstr "更新阅读进度"
+
+msgid "Upload all highlights and notes…"
+msgstr "上传全部高亮和笔记…"
+
+msgid "Upload automatically when connected"
+msgstr "联网后自动上传"
+
+msgid "Upload highlights"
+msgstr "上传高亮"
+
+msgid "Upload new highlights and notes"
+msgstr "上传新增高亮和笔记"
+
+msgid "Upload new highlights and notes automatically"
+msgstr "自动上传新增高亮和笔记"
+
+msgid "Upload now"
+msgstr "立即上传"
+
+msgid "Uploading %1 pending change(s)…"
+msgstr "正在上传 %1 项更改…"
+
+msgid "Uploads: %1 could not be sent"
+msgstr "上传：%1 项失败"
+
+msgid "Uploads: %1 waiting"
+msgstr "上传：%1 项待上传"
+
+msgid "Uploads: %1 waiting, paused"
+msgstr "上传：%1 项待上传，已暂停"
+
+msgid "Uploads: all sent"
+msgstr "上传：全部完成"
+
+msgid "Use a different instance"
+msgstr "使用其他实例"
+
+msgid "Use the token found in\n%1?"
+msgstr "使用在以下文件中找到的令牌？\n%1"
+
+msgid "Used by the QR code sign-in, which lets you choose a server and sign in on your phone. It only ever holds one sign-in for a few minutes. Clear it to hide that option."
+msgstr "用于二维码登录，让你在手机上选择服务器并登录。每次登录信息只暂存几分钟。清空地址可隐藏此选项。"
+
+msgid "Visibility: %1"
+msgstr "可见范围：%1"
+
+msgid "Visible to: %1"
+msgstr "可见范围：%1"
+
+msgid "Want to read"
+msgstr "想读"
+
+msgid "What do you want to say?"
+msgstr "你想说些什么？"
+
+msgid "What is NeoDB"
+msgstr "什么是 NeoDB"
+
+msgid "What is NeoDB…"
+msgstr "什么是 NeoDB…"
+
+msgid "When you open a book for the first time, this offers to find it on NeoDB. There is no question when you are signed out, or when the book already has a link."
+msgstr "首次打开一本书时，提示在 NeoDB 上查找。未登录或书籍已经关联时不会提示。"
+
+msgid "When you reach the last page of a linked book, set its NeoDB status to Finished."
+msgstr "读到已关联书籍的最后一页时，将其 NeoDB 状态设为“已读”。"
+
+msgid "Who can see this?"
+msgstr "谁可以看见？"
+
+msgid "Writes a post on your NeoDB account, with no book attached to it. Queued like everything else if you are offline."
+msgstr "在 NeoDB 账号上发布一条不关联书籍的动态。离线时会加入上传队列。"
+
+msgid "You are not signed in to NeoDB yet."
+msgstr "你尚未登录 NeoDB。"
+
+msgid "You will not be asked again. Turn this back on in the NeoDB settings."
+msgstr "以后不再询问。可在 NeoDB 设置中重新开启。"
+
+msgid "You're at %1."
+msgstr "当前进度为 %1。"
+
+msgid "Your account lives on one instance; pick the one you signed up with."
+msgstr "每个账号属于一个实例；请选择你注册账号的实例。"
+
+msgid "Your note"
+msgstr "笔记正文"
+
+msgid "Your rating"
+msgstr "你的评分"
+
+msgid "automatic"
+msgstr "自动"
+
+msgid "da"
+msgstr "丹麦语"
+
+msgid "de"
+msgstr "德语"
+
+msgid "development build, en"
+msgstr "开发测试站，英语"
+
+msgid "en"
+msgstr "英语"
+
+msgid "flagship, zh/en"
+msgstr "主站，中英双语"
+
+msgid "not set"
+msgstr "未设置"
+
+msgid "not signed in"
+msgstr "未登录"
+
+msgid "off"
+msgstr "关闭"
+
+msgid "on"
+msgstr "开启"
+
+msgid "page %1"
+msgstr "第 %1 页"
+
+msgid "page %1 of %2"
+msgstr "第 %1 页，共 %2 页"
+
+msgid "page number"
+msgstr "页码"
+
+msgid "percentage"
+msgstr "百分比"
+
+msgid "queued %1 highlight(s)"
+msgstr "%1 条高亮已加入队列"
+
+msgid "“%1”"
+msgstr "《%1》"
+
+msgid "✓ No rating"
+msgstr "✓ 未评分"

@@ -11,8 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install luajit
-        run: sudo apt-get update && sudo apt-get install -y luajit
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y luajit gettext
 
       # Every module is loaded by the harness, but this catches one that has been
       # added and not wired in yet.
@@ -32,6 +32,9 @@ jobs:
             echo "G_reader_settings used outside neodb_exporter.lua" >&2
             exit 1
           fi
+
+      - name: Check generated translations
+        run: python3 scripts/build-translations.py --check
 
       - name: Run the harnesses
         run: ./spec/run.sh

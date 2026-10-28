@@ -1,4 +1,4 @@
-local _ = require("gettext")
+local _ = require("neodb_i18n")
 
 --[[--
 `version` is the released tag, and "dev" in a checkout.
